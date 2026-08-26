@@ -1,0 +1,23 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now charon-mail-triage.path
+#
+# This unit IS the schedule. Nothing runs while the queue is empty: systemd
+# watches the directory with inotify and starts the worker the moment the poller
+# spools a message into it. Stop the AI half of the mail feature with
+#   sudo systemctl disable --now charon-mail-triage.path
+# after which mail still arrives and is still readable, it just arrives without
+# tags, urgency, or a summary.
+
+[Unit]
+Description=Charon mail triage queue watcher
+
+[Path]
+# Non-empty, not "changed": the worker deletes each entry as it finishes it, so
+# the queue emptying is the end condition and a queue that is still non-empty
+# when the service exits re-fires it. That is the retry path, and it retries
+# because work is still waiting rather than because a process exited.
+DirectoryNotEmpty=/home/pi/charon-mail/mail/.queue
+Unit=charon-mail-triage.service
+
+[Install]
+WantedBy=multi-user.target

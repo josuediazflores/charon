@@ -1,0 +1,71 @@
+# Copy to /etc/systemd/system/. Started by charon-messages-triage.path, never
+# enabled itself: enabling this would run a drain at every boot whether or not
+# anything is waiting.
+
+[Unit]
+Description=Charon messages triage, reply drafts and the daily read
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+# The mail session's own project directory, shared with the mail worker rather
+# than duplicated. Its settings.json is what is meant to make these sessions
+# tool-less -- an empty allow list and a deny on Edit over the whole tree -- on
+# the assumption that settings load from the working directory. Intended as a
+# permission boundary rather than a convenience; verify that settings wiring on
+# your install before relying on it. The ReadOnlyPaths/ReadWritePaths block
+# below is the part of the fence systemd enforces whatever the CLI does.
+WorkingDirectory=/home/pi/charon-mail/mail-env
+# The subscription token, and deliberately NOTHING else. This unit starts a
+# model session and the session inherits this environment: a credential that is
+# never loaded here is a credential the model cannot be handed. In particular
+# secrets/mail-env, which holds the mailbox password, is not read by this unit
+# and has nothing to do with this channel.
+EnvironmentFile=/home/pi/charon-mail/secrets/env
+ExecStart=/usr/bin/python3 /home/pi/charon-mail/bin/messages-triage.py
+# The worker's own walls are 420s per batch, 300s per draft and 420s per day, and
+# it works strictly one at a time, so this is the backstop for a long queue
+# rather than for a long session.
+TimeoutStartSec=1800
+# Lower than the mail worker's 10: a text somebody is waiting on is the most
+# time-sensitive thing on this box, and a batch of them should not queue behind
+# whatever else the operator has scheduled.
+Nice=5
+# Half the mail worker's. A batch here is eight short texts rather than eight
+# newsletters, and the ceiling that matters is the one that keeps a runaway
+# session from taking the Pi down with it.
+MemoryMax=2G
+NoNewPrivileges=true
+PrivateTmp=yes
+
+# The store, read-only, with four holes punched in it. **The worker writes
+# verdicts, drafts and summaries and nothing else**, so those three directories
+# plus the queue it drains and the lock it holds are the whole of what it may
+# change. Notice what is NOT writable here: index/ and bodies/, which only the
+# collector writes, the queued-send records, and .actions -- which is the "no
+# model in the send path" rule expressed as a mount option rather than as a
+# promise. A model session that went completely wrong still cannot file a send.
+#
+# ReadOnlyPaths over the store rather than ProtectSystem=strict over the box,
+# deliberately: under the claude-cli provider the session keeps its own state
+# under the home directory, and a blanket read-only root would break every
+# session while looking like a model outage.
+ReadOnlyPaths=/home/pi/charon-mail/messages
+ReadWritePaths=/home/pi/charon-mail/messages/ai
+ReadWritePaths=/home/pi/charon-mail/messages/drafts
+ReadWritePaths=/home/pi/charon-mail/messages/summaries
+ReadWritePaths=/home/pi/charon-mail/messages/.queue
+# The lock file itself, granted as the one file rather than as the store root,
+# so the root's own records stay read-only to this process.
+#
+# Every path above must exist before the unit starts -- systemd fails a
+# ReadWritePaths that names nothing -- so the deploy creates them, the lock file
+# included. That is deliberate: a typo here should refuse to start rather than
+# silently grant the parent.
+ReadWritePaths=/home/pi/charon-mail/messages/.triage.lock
+
+# Deliberately no Restart=. The path unit re-fires while the queue is non-empty,
+# which is the same retry with a truer trigger.

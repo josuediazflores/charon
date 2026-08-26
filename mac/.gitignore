@@ -1,0 +1,12 @@
+.DS_Store
+build/
+DerivedData/
+# xcodegen output. `name:` in project.yml decides the name, so ignore the shape.
+*.xcodeproj/
+xcuserdata/
+*.xcuserstate
+scratch/
+.env
+.env.*
+*.token
+secrets/

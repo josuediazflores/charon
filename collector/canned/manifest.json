@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Pre-rendered Jarvis phrases in whichever voice you render them in.",
+    "The collector serves one of these from memory when a /v1/jarvis/tts",
+    "sentence matches an entry's text -- see jarvis_canned_key for what",
+    "'matches' means. Every text below is ONE sentence, because the console's",
+    "extractor feeds the route one sentence at a time and a two-sentence",
+    "entry would never be asked for.",
+    "",
+    "REGENERATING THE SHELF. No audio ships with this repo -- the manifest",
+    "is the list of phrases, not a promise that the wavs exist. Render each",
+    "`text` below to the `file` beside it with any Kokoro-class TTS, at a",
+    "natural pace, and keep one voice across the whole set; the voice only",
+    "has to match itself, since every phrase not on the shelf is spoken by",
+    "the TTS host anyway. Until then the collector logs `canned clips not",
+    "rendered` once at startup and sends every sentence to the TTS host,",
+    "which is the feature switched off rather than broken. To add a clip:",
+    "render the wav here, add its entry, deploy. Nothing else reads this",
+    "file."
+  ],
+  "clips": [
+    { "file": "greet_daily_cmo.wav", "text": "Good morning sir, would you like me to tell you about your Daily CMO?" },
+    { "file": "ack_certainly.wav", "text": "Certainly sir." },
+    { "file": "ack_right_away.wav", "text": "Right away sir." },
+    { "file": "ack_of_course.wav", "text": "Of course sir." },
+    { "file": "ack_consider_done.wav", "text": "Consider it done." },
+    { "file": "wait_one_moment.wav", "text": "One moment sir." },
+    { "file": "wait_looking_into.wav", "text": "Just a moment while I look into that." },
+    { "file": "err_gone_wrong.wav", "text": "I'm afraid something has gone wrong." },
+    { "file": "err_unable.wav", "text": "My apologies sir, I was unable to complete that request." },
+    { "file": "bye_good_night.wav", "text": "Good night sir." }
+  ]
+}

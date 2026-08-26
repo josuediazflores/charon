@@ -1,0 +1,36 @@
+# Copy to /etc/systemd/system/. Started by charon-mail-triage.path, never enabled
+# itself: enabling this would run a drain at every boot whether or not anything
+# is waiting.
+
+[Unit]
+Description=Charon mail triage and reply drafts
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+# The mail session's own project directory. Its settings.json is what is meant
+# to make these sessions tool-less -- an empty allow list and a deny on Edit over
+# the whole tree -- on the assumption that settings load from the working
+# directory. Intended as a permission boundary rather than a convenience; verify
+# that settings wiring on your install before relying on it, or run one of the
+# HTTP providers in llm.py, which have no filesystem to fence off in the first
+# place.
+WorkingDirectory=/home/pi/charon-mail/mail-env
+# The subscription token, and deliberately NOT secrets/mail-env. This is the one
+# unit in the mail feature that starts a session, and the session inherits this
+# environment: a mailbox password that is never loaded here is a password the
+# model cannot be handed, however the session goes.
+EnvironmentFile=/home/pi/charon-mail/secrets/env
+ExecStart=/usr/bin/python3 /home/pi/charon-mail/bin/mail-triage.py
+# The worker's own walls are 420s per batch and 300s per draft, and it works
+# strictly one at a time, so this is the backstop for a long queue rather than
+# for a long session.
+TimeoutStartSec=1800
+Nice=10
+MemoryMax=4G
+NoNewPrivileges=true
+# Deliberately no Restart=. The path unit re-fires while the queue is non-empty,
+# which is the same retry with a truer trigger.

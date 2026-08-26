@@ -1,0 +1,130 @@
+name: HalftoneMail
+
+options:
+  bundleIdPrefix: com.example
+  createIntermediateGroups: true
+  # 15.0 and not 14.0: SwiftUI's `textRenderer(_:)` modifier is macOS 15, and
+  # the box a chat tag stands in is drawn by one -- there is no border attribute
+  # in either text system to fall back to.
+  deploymentTarget:
+    macOS: "15.0"
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ALWAYS_SEARCH_USER_PATHS: NO
+    CLANG_ENABLE_OBJC_ARC: YES
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    GCC_NO_COMMON_BLOCKS: YES
+
+targets:
+  HalftoneMail:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        excludes:
+          # Compiled at runtime, not at build time -- so it ships as a resource
+          # and must not be swept into Compile Sources. See below.
+          - "Kit/LiquidOrb.metal"
+      # The Jarvis orb's fluid, copied into the bundle verbatim and handed to
+      # `MTLDevice.makeLibrary(source:)` on first draw.
+      #
+      # **Not a compiled source, and the reason is Xcode rather than taste.**
+      # Xcode 26 moved the Metal compiler out of the default install into a
+      # separately downloaded component, so a `.metal` file in Compile Sources
+      # fails the whole build on a machine that has not run
+      # `xcodebuild -downloadComponent MetalToolchain` -- the entire app
+      # un-buildable for one decorative sphere. The runtime compiler is part of
+      # macOS and is always present; the OS caches the result by source hash, so
+      # it costs ~800ms once per build and ~0ms every launch after. If the
+      # toolchain ever becomes standard again, this entry and the loader in
+      # `LiquidOrb.swift` are what change together.
+      #
+      # **Copy Files rather than Resources, and that part is not taste either.**
+      # A Resources phase still runs build rules over what it copies, so a
+      # `.metal` sitting in it is handed to the missing compiler exactly as if
+      # it had been in Compile Sources. A Copy Files phase is a straight copy.
+      # It lands in Contents/Resources all the same.
+      - path: Sources/Kit/LiquidOrb.metal
+        buildPhase:
+          copyFiles:
+            destination: resources
+      - path: Resources/Fonts
+        type: folder
+        buildPhase: resources
+      # The pre-synthesized shelf: 40 WAVs and the manifest that keys them by
+      # exact sentence. A folder reference rather than a group, so the speaker
+      # can look them up under Canned/ the way the web looks them up under
+      # /canned/ -- and so a file added to the shelf needs no project change.
+      - path: Resources/Canned
+        type: folder
+        buildPhase: resources
+      # Both pieces of artwork are generated, not drawn: `scripts/generate-art.py`
+      # renders them from the formulas in that file and nothing else, so the
+      # provenance of every pixel is the script. Re-run it to change them.
+      - path: Resources/AppIcon.icns
+        buildPhase: resources
+      # The picture behind the window, at its own resolution. Deliberately not
+      # downsampled on the way in: a 1-bit ordered dither IS its lattice, and a
+      # resampler turns that lattice into grey noise -- which a PNG encoder then
+      # stores far less efficiently than the clean pattern it replaced.
+      - path: Resources/Backdrop.png
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Charon
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.charon
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/HalftoneMail.entitlements
+        # Ad-hoc signature: this tree carries no developer identity. To sign for
+        # real, set CODE_SIGN_STYLE to Automatic and add your own DEVELOPMENT_TEAM.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_EMIT_LOC_STRINGS: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        DEAD_CODE_STRIPPING: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+
+  # The Mac half of the Messages channel: no window, no SwiftUI, its own
+  # process. Not sandboxed, because it drives a helper that reads chat.db and
+  # sends Apple events to Messages -- neither of which a container permits.
+  # It shares the app's Keychain item and its `baseURL` preference, so
+  # installing it is copying it to /Applications and launching it once.
+  CharonBridge:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Bridge
+        excludes:
+          - "tests"
+          - "README.md"
+          - "Info.plist"
+      # The same Keychain item as Charon.app, by including the same file
+      # rather than by copying the two strings that name it.
+      - path: Sources/Keychain.swift
+    settings:
+      base:
+        PRODUCT_NAME: "Charon Bridge"
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.charon.bridge
+        INFOPLIST_FILE: Bridge/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        # Ad-hoc, as above -- set your own team here to sign for real.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "0.1.0"
+        SWIFT_EMIT_LOC_STRINGS: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        DEAD_CODE_STRIPPING: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"

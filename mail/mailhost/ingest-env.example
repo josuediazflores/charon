@@ -1,0 +1,37 @@
+# Copy to ~/charon-mail/secrets/ingest-env on the Pi and chmod 600 it:
+#
+#   install -m 600 mailhost/ingest-env.example ~/charon-mail/secrets/ingest-env
+#
+# The example lives here rather than in secrets/ because .gitignore covers
+# secrets/* with one exception already; this file carries variable names and
+# never values, so it is safe where it is and needs no new rule.
+#
+# mail-ingest.service reads the copy, not this file. Every value here is read
+# once at startup, so an edit means `sudo systemctl restart mail-ingest`.
+
+# --- required -----------------------------------------------------------
+# The bearer the Worker sends and the daemon checks. 24 characters minimum;
+# the daemon refuses to start under that, because this token is the only thing
+# in front of a port that writes into the agent's mailbox.
+#
+#   python3 -c "import secrets; print(secrets.token_hex(24))"
+#
+# The SAME value goes into the Worker, from the Mac:
+#
+#   wrangler secret put INGEST_TOKEN
+#
+# Rotation is both sides, in either order. The window between them is mail
+# refused with a temporary failure and retried by the sender, which is why the
+# refusal is temporary and why rotating is not an outage.
+INGEST_TOKEN=
+
+# --- optional -----------------------------------------------------------
+# Loopback port. Must match the ingress rule in /etc/cloudflared/config.yml and
+# nothing else in the system: a mismatch is a live tunnel answering 502.
+INGEST_PORT=8789
+
+# The domain this mailhost is for. When set, an envelope recipient at any other
+# domain is refused permanently -- the backstop for an Email Routing rule that
+# points somebody else's mail at this worker. Unset accepts whatever the Worker
+# sends, which is fine while testing and worth setting afterwards.
+MAIL_DOMAIN=example.com

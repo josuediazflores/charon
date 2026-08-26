@@ -1,0 +1,30 @@
+# Copy to /etc/systemd/system/. Started by charon-mail-actions.path, never enabled
+# itself: enabling this would run a drain at every boot whether or not anything
+# is waiting.
+#
+# This is the only unit in the system that can act outside the Pi. It runs no
+# session and starts no subprocess; it reads a record a human created by clicking
+# SEND twice, and sends exactly that.
+
+[Unit]
+Description=Charon mail actions (send, mark read, archive)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/charon-mail
+# The mail server, the mailbox address and its password. No subscription token:
+# nothing here has anything to say to a model.
+EnvironmentFile=/home/pi/charon-mail/secrets/mail-env
+ExecStart=/usr/bin/python3 /home/pi/charon-mail/bin/mail-actions.py
+# One SMTP submission is seconds. This is the backstop for a queue of them on a
+# bad uplink, each already bounded by its own 30 second socket timeout.
+TimeoutStartSec=600
+Nice=0
+MemoryMax=1G
+NoNewPrivileges=true
+# Deliberately no Restart=. A restart after a failed drain would re-attempt a
+# send, and the worker's whole retry policy is that a human retries, not a unit.

@@ -1,0 +1,26 @@
+# Copy to /etc/systemd/system/. Started by charon-mail-poll.timer. Safe to run by
+# hand for a test: sudo systemctl start charon-mail-poll.service
+
+[Unit]
+Description=Charon mail poll
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/charon-mail
+# The mail server, the mailbox address and its password, and nothing else. This
+# unit never loads secrets/env: it starts no session and has no use for the
+# subscription token. The split is the point -- see charon-mail-triage.service,
+# which loads the opposite file for the opposite reason.
+EnvironmentFile=/home/pi/charon-mail/secrets/mail-env
+ExecStart=/usr/bin/python3 /home/pi/charon-mail/bin/mail-poller.py
+# A quiet pass is a few seconds; a first backfill of 200 messages is a couple of
+# minutes. This is the wall for a poll wedged on a socket that the 30 second
+# constructor timeouts somehow did not catch.
+TimeoutStartSec=300
+Nice=10
+MemoryMax=1G
+NoNewPrivileges=true

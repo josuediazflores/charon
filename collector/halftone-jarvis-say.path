@@ -1,0 +1,40 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halftone-jarvis-say.path
+#
+# This unit IS the schedule. Nothing runs while nothing has been said: systemd
+# watches the directory with inotify and starts the service the moment the
+# collector spools a turn into it. Stop the talk lane with
+#   sudo systemctl disable --now halftone-jarvis-say.path
+# after which turns still file to disk and simply never get answered -- the day
+# keeps showing them queued, which is the true state, and jobs already filed
+# carry on running, because the work lane is a different unit.
+
+[Unit]
+Description=Halftone jarvis talk queue watcher
+
+[Path]
+# Non-empty, not "changed": the service deletes each entry as it answers it, so
+# the queue emptying is the end condition and a queue that is still non-empty
+# when the service exits re-fires it. That is the retry path -- a drain that
+# died halfway leaves true state behind and this starts it again.
+#
+# The spool is keyed by day, so at most one entry is ever waiting here: a day is
+# answered, unspooled, and filed again the next time something is said. That is
+# why this queue is short and the work queue is not, and why the two must not
+# share a drain.
+#
+# One directory, and the twin of this file watches the other one. Merging them
+# into a single unit with two DirectoryNotEmpty= lines is the mistake that
+# quietly undoes the whole feature: a path unit starts ONE service, so a job and
+# a turn would drain in the same oneshot, one after the other, and the talk lane
+# would be behind the work lane again. See halftone-jarvis-job.path.
+#
+# Deliberately NOT watching jarvis/.stop as well. A stop flag is read by a
+# runner that is already running; a path unit on it would start a second runner
+# to discover there is nothing to stop, and the first one's flock would send it
+# straight back out again.
+DirectoryNotEmpty=/home/pi/halftone-chat/jarvis/.say
+Unit=halftone-jarvis-say.service
+
+[Install]
+WantedBy=multi-user.target

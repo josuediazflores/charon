@@ -1,0 +1,40 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halftone-jarvis-job.path
+#
+# This unit IS the schedule. Nothing runs while no job is filed: systemd watches
+# the directory with inotify and starts the service the moment the collector
+# spools a job into it. Stop the work lane with
+#   sudo systemctl disable --now halftone-jarvis-job.path
+# after which jobs still file to disk and simply never run -- the job cards stay
+# queued, which is the true state, and **Jarvis carries on answering the whole
+# time** because the talk lane is a different unit that this command does not
+# touch. Being separately killable is not a convenience here; it is the property
+# the two lanes exist to have.
+
+[Unit]
+Description=Halftone jarvis work queue watcher
+
+[Path]
+# Non-empty, not "changed": the service deletes each entry as it runs it, so the
+# queue emptying is the end condition and a queue that is still non-empty when
+# the service exits re-fires it. That is the retry path -- a drain that died
+# halfway leaves true state behind and this starts it again.
+#
+# One directory, and that is the point of there being two path units. A single
+# unit can carry a second DirectoryNotEmpty= line, and pointing one at .say and
+# one at .jobs would look like it made the lanes independent. It would not: a
+# path unit starts ONE service, so both queues would drain in one oneshot, in
+# turn, and a half-hour job would delay the next thing typed into the console by
+# half an hour -- inside systemd rather than inside flock, but delayed exactly
+# the same. See halftone-jarvis-say.path, which is a whole separate file for
+# this reason alone.
+#
+# Deliberately NOT watching jarvis/.jobstop as well. A stop flag is read by a
+# runner that is already running; a path unit on it would start a second runner
+# to discover there is nothing to stop, and the first one's flock would send it
+# straight back out again.
+DirectoryNotEmpty=/home/pi/halftone-chat/jarvis/.jobs
+Unit=halftone-jarvis-job.service
+
+[Install]
+WantedBy=multi-user.target

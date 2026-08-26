@@ -1,0 +1,78 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Bash(/home/pi/halftone-chat/bin/memory *)",
+      "Bash(/home/pi/feed-worker/reddit-fetch.py)",
+      "Bash(/home/pi/feed-worker/reddit-fetch.py *)",
+      "Bash(systemctl status *)",
+      "Bash(systemctl list-units *)",
+      "Bash(systemctl list-timers *)",
+      "Bash(systemctl is-active *)",
+      "Bash(systemctl is-enabled *)",
+      "Bash(journalctl *)",
+      "Bash(df *)",
+      "Bash(free *)",
+      "Bash(uptime)",
+      "Bash(uname *)",
+      "Bash(ps aux)",
+      "Bash(ps -ef)",
+      "Bash(ip addr)",
+      "Bash(vcgencmd *)",
+      "Bash(tailscale status)",
+      "Bash(cat /proc/loadavg)",
+      "Bash(cat /proc/meminfo)",
+      "Bash(cat /proc/uptime)",
+      "Bash(cat /proc/stat)",
+      "Bash(cat /proc/cpuinfo)",
+      "Bash(cat /proc/version)",
+      "Bash(cat /proc/diskstats)",
+      "Bash(du *)",
+      "Bash(ls *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(grep *)",
+      "Bash(uniq *)",
+      "Bash(cut *)",
+      "Bash(tr *)",
+      "Bash(stat *)",
+      "Bash(file *)",
+      "Bash(date)",
+      "Bash(date *)"
+    ],
+    "deny": [
+      "Read(//home/pi/charon-mail/secrets/**)",
+      "Read(//home/pi/halftone-collector/.env)",
+      "Read(//home/pi/**/.env)",
+      "Read(//home/pi/**/.claude/**)",
+      "Read(//home/pi/.ssh/**)",
+      "Read(//home/pi/halftone-chat/env/**)",
+      "Read(//home/pi/halftone-chat/memory/.journal.jsonl)",
+      "Read(//proc/*/environ)",
+      "Read(//proc/*/cmdline)",
+      "Read(//proc/*/maps)"
+    ],
+    "additionalDirectories": [
+      "/home/pi/charon-mail",
+      "/home/pi/halftone-chat",
+      "/home/pi/halftone-collector",
+      "/var/lib/halftone-collector"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "WebFetch|WebSearch",
+        "hooks": [{ "type": "command",
+                    "command": "/home/pi/halftone-chat/bin/memory-taint" }] },
+      { "matcher": "Bash",
+        "hooks": [{ "type": "command",
+                    "command": "/home/pi/halftone-chat/bin/memory-taint --sniff" }] }
+    ]
+  }
+}

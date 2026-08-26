@@ -1,0 +1,27 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now charon-mail-poll.timer
+#
+# This is the reading half of the mail feature. Stop it with
+#   sudo systemctl disable --now charon-mail-poll.timer
+# after which the console keeps serving everything already indexed and simply
+# stops learning about new mail. Nothing else breaks: sending and archiving run
+# off their own path units and do not depend on this one.
+
+[Unit]
+Description=Charon mail poll schedule
+
+[Timer]
+# Not OnCalendar. Nothing about mail happens at a particular minute, so this is
+# an interval rather than an appointment. Two minutes after boot, because a Pi
+# that just came back should have an inbox before the operator opens the dashboard.
+OnBootSec=2min
+# Measured from the end of the last run, not the start: a slow poll on a bad
+# uplink must not stack the next one on top of itself.
+OnUnitActiveSec=5min
+# Deliberately no Persistent=. Catching up a missed five-minute poll means
+# running one poll immediately, which OnBootSec already does.
+RandomizedDelaySec=30
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

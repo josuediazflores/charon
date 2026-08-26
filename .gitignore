@@ -1,0 +1,76 @@
+# One repo, three components, three sets of rules merged. Two of the rules the
+# source repos carried were rewritten rather than copied; both are called out
+# where they appear.
+
+# --- macOS ----------------------------------------------------------------
+.DS_Store
+
+# --- Xcode and xcodegen ---------------------------------------------------
+# The project file is generated: `name:` in mac/project.yml decides what it is
+# called, so ignore the shape rather than one filename.
+*.xcodeproj/
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+scratch/
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.pyc
+
+# --- Secrets --------------------------------------------------------------
+# .env and the copies a careless `cp` leaves next to it. The bare `.env` rule
+# does not cover `.env.bak`, and one `git add -A` is all it takes. The
+# negation is what keeps collector/.env.example tracked: it carries variable
+# names, never values.
+.env
+.env.*
+!.env.example
+
+*.token
+
+# secrets/ holds the model provider's key and the mailbox credentials. The
+# example files are the only things under it that may be tracked.
+#
+# `**/secrets/*` and not `secrets/`, for two reasons: a pattern with a slash
+# in it is anchored to this directory, so the bare form would miss
+# mail/secrets/, and git does not descend into an ignored directory, so a
+# directory rule would make the negation below unreachable.
+**/secrets/*
+!**/secrets/*.example
+
+# --- Machine-local config -------------------------------------------------
+# config.json carries LAN addresses and paths. config.example.json is the
+# tracked one and these patterns cannot match it. The second line is for
+# `config.json.before-discovery` and its friends, which the bare name misses.
+config.json
+config.json.*
+
+# --- Runtime state --------------------------------------------------------
+# Written by a component run in place rather than deployed to the Pi. None of
+# these names exists in the tracked tree.
+state/
+public/
+logs/
+briefings/
+heartbeat/
+*.log
+
+# The two deploy roots, in case CHARON_MAIL_BASE or CHAT_BASE is ever pointed
+# at a directory inside this checkout. Live mail is other people's
+# correspondence and belongs in no repository.
+#
+# Deliberately NOT the bare `mail/` and `messages/` rules the source repos
+# carried. `mail/` is this repo's own component, and `messages/` would match
+# `mac/Sources/Messages/` wherever git is configured to ignore case, which is
+# the default on macOS. Either one silently un-tracks working code.
+charon-mail/
+halftone-chat/
+
+# --- Rendered audio -------------------------------------------------------
+# collector/canned/ ships the manifest and no audio on purpose: the manifest
+# is the list of phrases, not a promise that the wavs exist. Delete this line
+# if you want your own rendered shelf in git. (mac/Resources/Canned/ is
+# tracked and is not affected by this rule.)
+collector/canned/*.wav

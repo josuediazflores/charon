@@ -1,0 +1,92 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halftone-collector
+#
+# Requires COLLECTOR_API_TOKEN (>=24 chars) in .env. Generate it ON this host
+# BEFORE enabling -- the server refuses to start without one, and with
+# Restart=always that is a crash loop spamming the journal forever.
+
+[Unit]
+Description=Halftone telemetry collector
+# network-online, not network: this Pi is on wlan0 and the radio is not up
+# when network.target fires, so without this the collector races the wifi on
+# every boot and its first poll of every source fails.
+After=network-online.target
+Wants=network-online.target
+# Deliberately NOT After= the camera monitor units. This process reporting "the
+# monitor is not answering" is useful output, not a startup failure.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/halftone-collector
+EnvironmentFile=-/home/pi/halftone-collector/.env
+# -u, or Python block-buffers stdout into journald and `journalctl -f` looks
+# dead for minutes at a time.
+ExecStart=/usr/bin/python3 -u /home/pi/halftone-collector/collector.py serve
+Restart=always
+RestartSec=3
+
+# Creates and owns /var/lib/halftone-collector, which holds the last-known-good
+# cache so a restart shows real values with an honest age rather than four
+# empty panels.
+StateDirectory=halftone-collector
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# ReadWritePaths takes precedence over ProtectSystem, so the state dir stays
+# writable. ProtectHome=read-only still lets it read its own config and .env.
+ReadWritePaths=/var/lib/halftone-collector
+# The CMO curation ledger, written by the dismiss/restore routes. It lives in
+# the agent's directory rather than the state dir because the agent reads it
+# too, and ProtectHome=read-only would otherwise fail every write with EROFS
+# while all the reads carried on working.
+ReadWritePaths=/home/pi/charon-mail/memory
+# The ask threads and their spool, written by the ask route. Same EROFS
+# argument as the ledger line above, and the same reason for living in the
+# agent's directory: the ask-runner reads the thread this writes and writes the
+# answer back into it, so the file has to be somewhere both processes own.
+ReadWritePaths=/home/pi/charon-mail/ask
+# The mailbox: drafts, outbox records and the two spools the mail routes write.
+# Same EROFS argument again, and this is the one where the symptom is worst --
+# reading the inbox would carry on working while every mark-read, draft and SEND
+# failed, which reads as a broken console rather than as a unit file one line
+# short. Note what is NOT granted anywhere here: no mail credentials, which live
+# only in the poller's and the actions worker's own EnvironmentFile.
+ReadWritePaths=/home/pi/charon-mail/mail
+# The Messages channel: the collector is the writer of messages/ (ingest,
+# outbox, config, read marks). Same rule: the directory must exist first.
+ReadWritePaths=/home/pi/charon-mail/messages
+# The chat assistant's thread records and its two flag directories, written by
+# the /v1/chat routes. Same EROFS argument once more.
+#
+# `threads` and not `halftone-chat`, which is the parent: the sibling of this
+# directory is `env/`, the model session's own working directory, and the file
+# in it that says what a session is allowed to do is the last file on this box
+# that should be writable by the process with a listening port. The narrower
+# path is the whole of that argument.
+#
+# Must exist before the unit starts -- systemd fails a ReadWritePaths that
+# names nothing -- so the deploy creates it. That is deliberate: a typo here
+# should refuse to start rather than silently grant the parent.
+ReadWritePaths=/home/pi/halftone-chat/threads
+# Jarvis's day records, job records and its four flag directories, written by
+# the /v1/jarvis routes.
+#
+# **A sibling of `threads`, not a child of it**, so the line above does not
+# cover it and the symptom if this is missing is the worst one this file
+# produces: every read works, the page draws, and every single write fails
+# EROFS -- a console that looks fine and cannot be typed into.
+#
+# Granted at `jarvis` and not at the parent for the reason the line above gives.
+# `env/` is the model session's own working directory and the file in it that
+# says what a session may do is the last file on this box that should be
+# writable by the process with a listening port. Two narrow grants, never one
+# wide one.
+ReadWritePaths=/home/pi/halftone-chat/jarvis
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+# Copy to /etc/systemd/system/ and:
+#   mkdir -p /home/pi/charon-mail/messages/.queue
+#   sudo systemctl daemon-reload && sudo systemctl enable --now charon-messages-triage.path
+#
+# The directory has to exist before the unit starts: a Path unit watching a
+# directory that is not there sits inactive and never fires, which looks exactly
+# like a worker that is broken.
+#
+# This unit IS the schedule. Nothing runs while the queue is empty: systemd
+# watches the directory with inotify and starts the worker the moment the
+# collector spools something into it. Stop the AI half of the messages channel
+# with
+#   sudo systemctl disable --now charon-messages-triage.path
+# after which texts still arrive and are still readable, they just arrive
+# without tags, urgency, a summary or a daily read.
+
+[Unit]
+Description=Charon messages triage queue watcher
+
+[Path]
+# Non-empty, not "changed": the worker deletes each entry as it finishes it, so
+# the queue emptying is the end condition and a queue that is still non-empty
+# when the service exits re-fires it. That is the retry path, and it retries
+# because work is still waiting rather than because a process exited.
+DirectoryNotEmpty=/home/pi/charon-mail/messages/.queue
+Unit=charon-messages-triage.service
+
+[Install]
+WantedBy=multi-user.target

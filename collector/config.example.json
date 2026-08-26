@@ -1,0 +1,215 @@
+{
+  "_comment": [
+    "Copy to config.json and adjust. config.json is gitignored because it",
+    "carries LAN addresses. Secrets are never in here -- only the NAME of the",
+    "environment variable that holds each one, which lives in .env.",
+    "",
+    "Anything omitted falls back to DEFAULTS in collector.py, so a deployed",
+    "box only needs to carry what it actually overrides. That is why adding a",
+    "new setting never requires touching the Pi."
+  ],
+
+  "api_bind": "127.0.0.1",
+  "api_port": 8788,
+  "api_token_env": "COLLECTOR_API_TOKEN",
+  "state_dir": "/var/lib/halftone-collector",
+  "dashboard_dir": "/srv/halftone-console",
+
+  "camera": {
+    "base_url": "http://127.0.0.1:8787",
+    "token_env": "MONITOR_API_TOKEN",
+    "interval_s": 10,
+    "frame_enabled": true,
+    "frame_min_interval_s": 8
+  },
+
+  "pihole": {
+    "host": "10.0.0.3",
+    "scheme": "http",
+    "password_env": "PIHOLE_APP_PASSWORD",
+    "interval_s": 30
+  },
+
+  "nodes": {
+    "interval_s": 15,
+    "list": [
+      {
+        "id": "pi5", "host": "raspberrypi", "addr": "10.0.0.2", "probe": "self",
+        "kind": "Pi 5 · NVMe", "role": "Camera · stillness detect"
+      },
+      {
+        "id": "pizero", "host": "pizero", "addr": "10.0.0.3", "probe": "tcp:53",
+        "kind": "Zero W · armv6l", "role": "Pi-hole DNS"
+      },
+      {
+        "id": "tapo", "host": "tapo-c100", "addr": "10.0.0.4", "probe": "tcp:554",
+        "kind": "RTSP cam", "role": "Camera feed source"
+      },
+      {
+        "id": "robot", "host": "robot", "addr": "100.64.0.4", "probe": "tcp:22",
+        "kind": "Orin Nano", "role": "Jetson robot"
+      }
+    ]
+  },
+
+  "commits": {
+    "token_env": "GITHUB_TOKEN",
+    "interval_s": 300,
+    "count": 5,
+
+    "_commits_comment": [
+      "Repos are discovered, not listed. `discover` is on by default; the",
+      "keys below are shown at their defaults so they are easy to find.",
+      "",
+      "`repos` overrides discovery entirely when it is non-empty -- keep it",
+      "empty unless you want this panel pinned to specific repos, because a",
+      "hand-written list is exactly what goes stale without telling you.",
+      "",
+      "`untracked` is unrelated to either: those are local projects with no",
+      "git remote, which GitHub cannot see however hard it looks."
+    ],
+
+    "discover": true,
+    "poll_repos": 8,
+    "include_forks": false,
+    "min_rate_remaining": 50,
+    "repos": [],
+    "untracked": ["local-only-project"]
+  },
+
+  "healthchecks": {
+    "_healthchecks_comment": [
+      "A once-a-day pass, kept as a ninety-day history in",
+      "state_dir/healthchecks.json. There is no hour-of-day setting on",
+      "purpose: the checks run the first time a poll notices that today has",
+      "no entry yet, so `interval_s` is only how quickly the date rollover",
+      "gets noticed -- not how often the checks run.",
+      "",
+      "A check whose instrument is missing is left out of the day rather",
+      "than counted as a failure, so this runs clean on a dev Mac with the",
+      "Pi-only rows (throttling, soc temp, memory) simply absent.",
+      "",
+      "The zero_* keys are the only Zero W touchpoint here and stay flat:",
+      "the config merge is one level deep, so a nested block would be",
+      "replaced wholesale by a box that overrode a single key."
+    ],
+
+    "interval_s": 600,
+    "history_days": 90,
+    "temp_max_c": 75,
+    "root_disk_max_pct": 90,
+    "state_disk_max_pct": 90,
+    "mem_min_available_mb": 200,
+    "zero_enabled": true,
+    "zero_addr": "10.0.0.3",
+    "zero_port": 53,
+    "zero_timeout_s": 2.0
+  },
+
+  "cmo": {
+    "_cmo_comment": [
+      "The Daily CMO job's own files, read off local disk -- nothing here",
+      "goes over the network. base_dir is the working directory the job",
+      "runs in; the source reads heartbeat/cmo.json (required),",
+      "state/agent-result.json, memory/seen-items.jsonl and briefings/.",
+      "",
+      "The source is dormant, not failing, until the job has run once and",
+      "written a heartbeat. That is a statement about the box, not an",
+      "error, and it needs no configuration to say so.",
+      "",
+      "history_days and briefings_max are display windows, not retention:",
+      "this never deletes anything the job wrote.",
+      "",
+      "Flat keys, like healthchecks' zero_* ones and for the same reason:",
+      "the config merge is one level deep, so a nested block would be",
+      "replaced wholesale by a box that overrode a single key inside it."
+    ],
+
+    "interval_s": 60,
+    "base_dir": "/home/pi/charon-mail",
+    "history_days": 14,
+    "briefings_max": 10,
+    "running_stuck_after_s": 5400,
+    "seen_items_max_bytes": 1048576
+  },
+
+  "mail": {
+    "_mail_comment": [
+      "The Gmail mirror under base_dir/mail, read off local disk. The",
+      "collector never talks to Gmail and holds no mail credentials: the",
+      "app password lives with the poller and the actions worker, which are",
+      "timer- and path-driven scripts with no listening socket between them;",
+      "this program reads the files they write and queues spool entries for",
+      "them to act on.",
+      "",
+      "So there is no token_env here and nothing to add to .env. The source",
+      "is dormant, not failing, until the poller's first run writes",
+      "mail/state.json -- a statement about the box rather than an error.",
+      "",
+      "list_max is a display window like briefings_max: nothing is deleted,",
+      "and anything the list leaves out is still on the message route.",
+      "poll_stale_after_s is the mailbox's own staleness, not our copy's --",
+      "the poller fires every 5 minutes, so 1200 is four missed fires.",
+      "",
+      "Its own base_dir even though it is the same directory the cmo block uses:",
+      "the config merge is one level deep, so a box that moved one of the two",
+      "would otherwise have to move both. Flat keys for the same reason."
+    ],
+
+    "interval_s": 60,
+    "base_dir": "/home/pi/charon-mail",
+    "list_max": 50,
+    "poll_stale_after_s": 1200
+  },
+
+  "chat": {
+    "_chat_comment": [
+      "The chat assistant's conversations, under base_dir/threads. This is",
+      "the one block here that is NOT a source: it has no interval_s and no",
+      "stale_after_s, nothing polls it, and it never joins /v1/telemetry.",
+      "A conversation is interactive -- the CHAT tab asks for the thread it",
+      "is looking at, on its own cadence -- and a chat that also arrived once",
+      "a minute inside a document about disk temperature would be a second",
+      "copy of the same state going stale on its own schedule.",
+      "",
+      "The collector writes the thread record, the user turn, the .queue",
+      "spool entry and the .stop flag, and nothing else. chat-runner.py,",
+      "started by halftone-chat.path when .queue stops being empty, writes",
+      "the status, the streaming partial, the assistant turn and the claude",
+      "session id, and deletes both flags. One writer per field.",
+      "",
+      "This process starts no model and holds no credentials for one. The",
+      "runner is where claude is invoked, under its own unit, with its own",
+      "working directory and its own permission allowlist (env/.claude/).",
+      "",
+      "Under systemd the collector needs",
+      "ReadWritePaths=/home/pi/halftone-chat in its unit, for the reason",
+      "every other write path here needs one: ProtectHome is read-only, so",
+      "without it every send fails EROFS while every read carries on working."
+    ],
+
+    "base_dir": "/home/pi/halftone-chat"
+  },
+
+  "tts": {
+    "_tts_comment": [
+      "The Kokoro voice service on the Mac, an external TTS host reached",
+      "over the tailnet on port 8790. The collector only proxies:",
+      "the browser never talks to the Mac, which is what keeps the audio",
+      "same-origin with the page that plays it. Like chat, this is not a",
+      "source -- nothing polls it and it never joins /v1/telemetry.",
+      "",
+      "The shared secret is not here, per the rule at the top of this",
+      "file: it lives in .env as HALFTONE_TTS_KEY and is forwarded to the",
+      "Mac as X-Halftone-Key.",
+      "",
+      "This block has no entry in DEFAULTS, and that absence is the off",
+      "switch: leave it out of config.json and voice is simply disabled --",
+      "both tts routes answer 503, the console draws a dim word, and",
+      "nothing errors. A base without the .env key is the same off, not a",
+      "third state."
+    ],
+
+    "base": "http://<mac-tailnet-ip>:8790"
+  }
+}

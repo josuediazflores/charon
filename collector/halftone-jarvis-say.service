@@ -1,0 +1,60 @@
+# Copy to /etc/systemd/system/. Started by halftone-jarvis-say.path, never
+# enabled itself: enabling this would run a drain at every boot whether or not
+# anything is waiting.
+#
+# This is the talk lane -- the one a person is watching. Everything that differs
+# between this unit and halftone-jarvis-job.service is written from that one
+# fact.
+
+[Unit]
+Description=Halftone jarvis session runner
+Wants=network-online.target
+After=network-online.target
+# Deliberately no After= or Conflicts= naming halftone-jarvis-job.service. The
+# two are meant to be alive at the same time; any ordering between them would be
+# a serialisation, which is the exact thing the work lane was split out to
+# avoid.
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+# Jarvis's own project directory, shared with the work lane, and a permission
+# boundary rather than a convenience: its .claude/settings.json is the
+# default-deny allowlist that decides what these sessions may run, and claude
+# loads that from the working directory. Point this somewhere else and the
+# session inherits whatever settings it finds there instead.
+WorkingDirectory=/home/pi/halftone-chat/sayenv
+ExecStart=/usr/bin/python3 -u /home/pi/halftone-chat/bin/jarvis-say-runner.py
+# The runner's own per-turn wall is 600s and it answers strictly one at a time,
+# so this is the backstop for a long queue rather than for a long answer.
+TimeoutStartSec=3600
+# The same Nice= as the chat runner, and above the work lane's 15 on purpose:
+# when both lanes are alive the answer wins the core. See
+# halftone-jarvis-job.service for the other half of that argument.
+Nice=10
+MemoryMax=4G
+# Deliberately no Restart=. The path unit re-fires while the queue is non-empty,
+# which is the same retry with a truer trigger: it restarts because work is
+# still waiting, not because a process exited.
+
+# -- what this session can touch ------------------------------------------
+#
+# Lighter than halftone-collector.service on purpose, and the difference is the
+# point of the whole feature: this process exists to answer questions about the
+# state of this box, so it reads /proc, /sys, the journal and the unit files.
+# Sandboxing those away would leave an assistant that can only say it does not
+# know. The narrowing that matters happens one level up instead -- in
+# env/.claude/settings.json, which is a default-deny allowlist of read-only
+# commands, and in the CLI's own --permission-mode dontAsk.
+#
+# So: no ProtectSystem=strict, no ProtectHome. What is kept is the pair that
+# costs nothing and closes the worst outcomes.
+NoNewPrivileges=true
+PrivateTmp=yes
+
+# No [Install] section, deliberately. This unit is started by
+# halftone-jarvis-say.path, never enabled directly. Omitting [Install] is what
+# makes `systemctl enable halftone-jarvis-say.service` fail loudly ("no
+# installation config") instead of silently succeeding and running a drain at
+# every boot -- a WantedBy= here would do the exact opposite of preventing that.

@@ -1,0 +1,22 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now charon-mail-actions.path
+#
+# This unit IS the schedule. It watches the directory the collector spools a
+# human's click into: mark read, archive, and the one send path in the system.
+# Disabling it is the kill switch for outward action:
+#   sudo systemctl disable --now charon-mail-actions.path
+# after which SEND still writes an outbox record, the record stays `queued`
+# forever, and no mail leaves the box.
+
+[Unit]
+Description=Charon mail actions queue watcher
+
+[Path]
+# Separate from the triage queue on purpose. A send must never wait behind an
+# Opus draft that is four minutes into a session, and these two directories being
+# different is what makes that true without any coordination between the workers.
+DirectoryNotEmpty=/home/pi/charon-mail/mail/.actions
+Unit=charon-mail-actions.service
+
+[Install]
+WantedBy=multi-user.target

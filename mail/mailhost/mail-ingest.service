@@ -1,0 +1,42 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mail-ingest
+#
+# Fill secrets/ingest-env BEFORE enabling. The daemon refuses to start without
+# an INGEST_TOKEN of 24 characters, and with Restart=always that is a restart
+# loop -- systemd gives up after five tries in ten seconds and the unit then
+# needs `sudo systemctl reset-failed mail-ingest` before it will start again.
+
+[Unit]
+Description=Charon mail ingest (Cloudflare Email Worker to local SMTP)
+# network-online, not network: this Pi is on wlan0 and the radio is not up when
+# network.target fires, so the bind would race the interface on every boot.
+Wants=network-online.target
+After=network-online.target stalwart.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/charon-mail
+# The ingest token, the port and the domain, and nothing else. No mailbox
+# credentials: this process injects over a loopback SMTP listener that trusts
+# local connections, so there is no password here for anything to leak.
+EnvironmentFile=/home/pi/charon-mail/secrets/ingest-env
+ExecStart=/usr/bin/python3 /home/pi/charon-mail/mailhost/ingest.py
+# A long-lived listener, unlike every other unit in this repo: mail arrives when
+# it arrives, and a oneshot would mean a queue somewhere. Restarting is the
+# right answer to every crash, since the sender still holds the message.
+Restart=always
+RestartSec=3
+# Below the poller and the triage worker, above nothing. Injection is a few
+# milliseconds of work; what matters is that it answers, not that it answers
+# first, and a message the daemon is slow to take is a message the sender keeps.
+Nice=10
+NoNewPrivileges=true
+
+# After= stalwart, not Requires=. Stalwart being down is a 451 to the Worker
+# and a retry from the sender, which is a better outcome than this unit
+# stopping and starting with the mail server it merely talks to.
+
+[Install]
+WantedBy=multi-user.target

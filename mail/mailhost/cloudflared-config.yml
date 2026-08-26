@@ -1,0 +1,27 @@
+# Template for /etc/cloudflared/config.yml on the Pi. Replace <TUNNEL_ID> with
+# what `cloudflared tunnel create charon-mail` prints, and example.com with
+# the mail domain.
+#
+# There is no .service file for the tunnel in this directory on purpose:
+# `sudo cloudflared service install` writes /etc/systemd/system/cloudflared.service
+# itself, reading this file for the tunnel it should run. Install the config
+# first, or the generated unit points at a tunnel that does not exist yet.
+#
+# The tunnel is outbound-only. Nothing is forwarded, no port is opened on the
+# router, and the Pi's address is never in DNS -- which is the whole reason the
+# inbound mail path goes through Cloudflare instead of an MX record pointed at
+# a home uplink.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # The one hostname this tunnel serves. The port must match INGEST_PORT in
+  # secrets/ingest-env; a mismatch is a tunnel that connects and answers 502.
+  - hostname: mail-ingest.example.com
+    service: http://127.0.0.1:8789
+
+  # Required, and required last: cloudflared refuses to start without a final
+  # rule that carries no hostname. 404 rather than a service, so anything that
+  # reaches this tunnel under another name gets nothing at all.
+  - service: http_status:404

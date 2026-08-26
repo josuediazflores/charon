@@ -1,0 +1,28 @@
+# The inbound half of Charon's mail domain. Deployed from the Mac, where
+# wrangler is logged in:
+#
+#   wrangler secret put INGEST_TOKEN     # once, and again after any rotation
+#   wrangler deploy
+#
+# Deploying does not route anything on its own. Email Routing in the Cloudflare
+# dashboard is what points charon@example.com at this worker, and until that
+# rule exists a deployed worker is a worker nothing ever calls. See
+# ../README.md step 4.
+
+name = "charon-mail-bridge"
+main = "src/worker.js"
+compatibility_date = "2026-08-01"
+
+[vars]
+# A plain var, not a secret. It is a hostname that is already in public DNS,
+# and the bearer is the only thing that makes the endpoint usable.
+#
+# The path matters: the daemon serves /ingest and answers 404 on anything else,
+# so a URL that stops at the host is a tunnel that works and mail that does not.
+INGEST_URL = "https://mail-ingest.example.com/ingest"
+
+# INGEST_TOKEN is deliberately not here. It goes in with
+# `wrangler secret put INGEST_TOKEN`, which stores it on Cloudflare's side and
+# leaves nothing on disk; a [vars] entry would put a live credential into a
+# repo that has a remote, which is the one thing .gitignore cannot save you
+# from once it is committed.

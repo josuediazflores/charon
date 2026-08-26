@@ -1,0 +1,28 @@
+# Copy to /etc/systemd/system/ and:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now halftone-chat.path
+#
+# This unit IS the schedule. Nothing runs while the queue is empty: systemd
+# watches the directory with inotify and starts the service the moment the
+# collector spools a turn into it. Stop the whole feature with
+#   sudo systemctl disable --now halftone-chat.path
+# after which messages still file to disk and simply never get answered -- the
+# CHAT tab keeps showing them queued, which is the true state.
+
+[Unit]
+Description=Halftone chat queue watcher
+
+[Path]
+# Non-empty, not "changed": the service deletes each entry as it answers it, so
+# the queue emptying is the end condition and a queue that is still non-empty
+# when the service exits re-fires it. That is the retry path -- a drain that
+# died halfway leaves true state behind and this starts it again.
+#
+# Deliberately NOT watching threads/.stop as well. A stop flag is read by a
+# runner that is already running; a path unit on it would start a second runner
+# to discover there is nothing to stop, and the first one's flock would send it
+# straight back out again.
+DirectoryNotEmpty=/home/pi/halftone-chat/threads/.queue
+Unit=halftone-chat.service
+
+[Install]
+WantedBy=multi-user.target
