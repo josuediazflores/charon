@@ -6,6 +6,8 @@ sessions and holds every piece of state. A native macOS app is the face you look
 at. The two talk over a private network with a bearer token, and nothing here is
 exposed to the internet.
 
+![The Overview tab](docs/screenshots/1-overview.png)
+
 What it does, concretely:
 
 - **Telemetry.** Eight sources polled on their own intervals, each keeping its
@@ -42,6 +44,71 @@ the map and the setup order; those files are the reasoning.
 
 There is no build system spanning the three. They are three programs that agree
 on a wire format, and you can run any one of them without the other two.
+
+## The console
+
+Eight destinations on one window, `⌘1` through `⌘8`. Every shot below is the app
+in **Demo mode**, which is what you get on first launch before you point it at a
+Pi: the people, companies and figures in them are the invented cast described
+under **Making it yours**, and none of the panels is reading a real machine.
+
+**Hardware.** Every node the collector knows about, with the two that are not
+answering said once above the table and again inside it. The camera panel fetches
+its still with a bearer header rather than linking it, and whether there is a
+feed at all is read from the JSON, never inferred from whether an image happened
+to load.
+
+![The Hardware tab](docs/screenshots/2-hardware.png)
+
+**CMO.** A briefing produced by a scheduled model session on the Pi, with its run
+record, its pipeline and its watchlist beside it. The row marked `×` is one you
+dismissed: it loses its priority pips entirely rather than dimming them, because
+the ranking was a claim about what to do next and you have answered it.
+
+![The CMO tab](docs/screenshots/3-cmo.png)
+
+**Mail.** The mirrored mailbox. Line three of each row is the machine's reading:
+the tags it chose, whether a reply is queued or sent, and whether it has been
+triaged at all. A send that failed is a mark on line one instead, because
+nothing above the list counts one.
+
+![The Mail tab](docs/screenshots/4-mail.png)
+
+Opening a message collapses the rail and puts the sender's own words on the
+page. The summary above them is labelled with the model that wrote it and says
+plainly that it is not the sender's words. `Reply` and `AI draft` both end at a
+draft: the only thing that sends is your second click on SEND.
+
+![A message open in the reader](docs/screenshots/4b-mail-reader.png)
+
+**Messages.** iMessage conversations you explicitly allowlisted, carried up from
+the Mac by the Bridge. Chats you did not allowlist are not on this list because
+they were never read.
+
+![The Messages tab](docs/screenshots/5-messages.png)
+
+The pinned thread at the top is the agent itself, and it is the clearest picture
+of the consent model in the whole app: asked to send, it drafts, queues, and
+then says it does not send on its own.
+
+![The agent thread in Messages](docs/screenshots/5b-messages-thread.png)
+
+**Chat.** A model session running on the Pi, in its own working directory under
+a default-deny allowlist. It reads the box and the web and changes nothing but
+its own memory.
+
+![The Chat tab](docs/screenshots/6-chat.png)
+
+**Jarvis.** One conversation per day rather than one per task, with long work
+running as jobs in a second lane that never blocks the conversation. The orb is
+a 1-bit dither and its state is the session's state.
+
+![The Jarvis tab](docs/screenshots/7-jarvis.png)
+
+**Settings.** Every row carries its own reasoning, including the rows that are
+fixed and explain why they are not a choice.
+
+![The Settings tab](docs/screenshots/8-settings.png)
 
 ## Security and consent
 
