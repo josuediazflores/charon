@@ -14,6 +14,10 @@ enum AfterArchive: String {
     case inbox
 }
 
+enum ConsoleFeature: String, CaseIterable {
+    case mail, messages, chat, jarvis
+}
+
 /* The console's own preferences, ported from `state/mailSettings.ts`'s
  * `charon-settings-v1` blob.
  *
@@ -38,6 +42,35 @@ final class ConsoleSettings {
     /// objects reading the same defaults would be two answers to a question
     /// with one.
     static let shared = ConsoleSettings()
+
+    // Store only opt-outs so existing installations and new features start enabled.
+    private(set) var disabledFeatures: Set<ConsoleFeature> {
+        didSet {
+            UserDefaults.standard.set(disabledFeatures.map(\.rawValue).sorted(),
+                                      forKey: "disabledFeatures")
+        }
+    }
+
+    func isEnabled(_ feature: ConsoleFeature) -> Bool {
+        !disabledFeatures.contains(feature)
+    }
+
+    func setEnabled(_ enabled: Bool, for feature: ConsoleFeature) {
+        if enabled {
+            disabledFeatures.remove(feature)
+        } else {
+            disabledFeatures.insert(feature)
+        }
+    }
+
+    func isTabAvailable(_ id: String) -> Bool {
+        if let feature = ConsoleFeature(rawValue: id) { return isEnabled(feature) }
+        return ConsoleNav.ids.contains(id)
+    }
+
+    var availableTabs: [SidebarItemSpec] {
+        ConsoleNav.items.filter { isTabAvailable($0.id) }
+    }
 
     /// The rail steps aside while a mail message is open. On a narrow pane 200
     /// points of navigation is half the viewport; on a wide one it is 200
@@ -208,6 +241,8 @@ final class ConsoleSettings {
     }
 
     private init() {
+        let disabled = UserDefaults.standard.stringArray(forKey: "disabledFeatures") ?? []
+        disabledFeatures = Set(disabled.compactMap(ConsoleFeature.init(rawValue:)))
         railCollapse = ConsoleSettings.flag("railCollapse", default: true)
         rowNote = ConsoleSettings.flag("rowNote", default: true)
         summaryOpen = ConsoleSettings.flag("summaryOpen", default: true)
@@ -237,7 +272,7 @@ final class ConsoleSettings {
 
     /// The validated landing tab, for a cold start.
     var landing: String {
-        ConsoleNav.ids.contains(landingTab) ? landingTab : "overview"
+        isTabAvailable(landingTab) ? landingTab : "overview"
     }
 
     private func write(_ key: String, _ value: Bool) {

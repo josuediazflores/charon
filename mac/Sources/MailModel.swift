@@ -195,8 +195,11 @@ final class MailModel {
         // fetch returned would make an eight-second poll read as eight seconds
         // of staleness that never happened.
         now = Date()
+        let source = store
         do {
-            let got = try await store.telemetry()
+            let got = try await source.telemetry()
+            // A connection change can complete while the previous collector is answering.
+            guard source === store else { return }
             let at = Date()
             payload = got
             reachable = true
@@ -207,6 +210,7 @@ final class MailModel {
             if let raw = store.lastRawTelemetry { TelemetryCache.save(raw, at: at) }
             reconcile()
         } catch {
+            guard source === store else { return }
             // The last known payload is kept and demoted rather than dropped. A
             // list that empties itself the first time a poll misses is a worse
             // lie than a list that says it is old.

@@ -641,11 +641,8 @@ struct ChatComposer: View {
 
     /// What `ChatTags` says the caret is sitting in, as rows.
     ///
-    /// The composer's whole half of the completion contract, and it is six
-    /// lines because the vocabulary and the boundary rule both live in
-    /// `ChatTags` -- this only turns one into the other. `static` so it holds
-    /// nothing: it is a pure reading of a string, called from a text view's
-    /// coordinator on a keystroke.
+    /// The composer offers tags for enabled features. The full vocabulary
+    /// still applies to typed text and to existing transcripts.
     ///
     /// **The `@` goes back on and a space follows.** What is *shown* is the
     /// bare word, because the sigil is noise in a list where every row has one;
@@ -659,9 +656,11 @@ struct ChatComposer: View {
         return PromptToken(
             range: partial.range,
             query: partial.prefix,
-            rows: ChatTags.completions(prefix: partial.prefix).map {
-                CompletionRow(glyph: $0.kind.glyph, name: $0.name,
-                              hint: $0.hint, insert: "@\($0.name)")
+            rows: ChatTags.completions(prefix: partial.prefix).compactMap { tag in
+                if let feature = ConsoleFeature(rawValue: tag.name),
+                   !ConsoleSettings.shared.isEnabled(feature) { return nil }
+                return CompletionRow(glyph: tag.kind.glyph, name: tag.name,
+                                     hint: tag.hint, insert: "@\(tag.name)")
             })
     }
 

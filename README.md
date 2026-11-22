@@ -523,6 +523,10 @@ third state. The contract your TTS host has to honor is in the next section.
 
 ## Making it yours
 
+To configure Overview, follow the [widget setup guide](mac/Resources/WidgetHelp/AGENTS.md). The Mac app also includes it in **Copy setup request**.
+
+To design a custom card, connect JSON, or add a Swift display, follow the [widget design guide](mac/Resources/WidgetHelp/AGENT-WIDGET-DESIGN.md).
+
 Every identifying value in this repo is an example. Nothing breaks if you leave
 them, but nothing works either. This is the complete list.
 

@@ -49,6 +49,7 @@ struct SettingsView: View {
     @State private var known: [MessageChatSummary] = []
     /// Whether the add row is open.
     @State private var adding = false
+    @State private var allowlistRefresh = 0
     /// Why the last edit did not land, if it did not.
     @State private var allowFault: String?
 
@@ -60,12 +61,6 @@ struct SettingsView: View {
 
     /// Where a message goes once it is filed.
     private let afterArchive = ["the next message", "the inbox"]
-
-    /// The seven rail destinations, by label. Read off the nav rather than
-    /// spelled out a second time -- a tab that is ever cut is cut in one place,
-    /// and `landing` validates the stored id against the same list before
-    /// anything opens on it.
-    private var tabs: [String] { ConsoleNav.items.map(\.label) }
 
     /// The transparency slider works in what its label says. The wash is
     /// stored as its own opacity, because that is what the layer takes;
@@ -95,8 +90,8 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: HT.row) {
-            PageHead(title: "Settings",
-                     subtitle: "how this console behaves · the mail app, the briefing, the shell")
+            PageHead(title: "Settings", subtitle: "how this console behaves")
+            KeyButton("Connection") { model.showingConnection = true }
 
             // **A measure, because every row here is a dot leader.** A leader
             // is a line the eye follows from a label to its control, and on a
@@ -112,8 +107,13 @@ struct SettingsView: View {
             // title is two pages.
             VStack(alignment: .leading, spacing: HT.row) {
                 HTGrid {
-                    Cell(span: 12) { mail }
-                    Cell(span: 12) { messages }
+                    Cell(span: 12) { features }
+                    if settings.isEnabled(.mail) {
+                        Cell(span: 12) { mail }
+                    }
+                    if settings.isEnabled(.messages) {
+                        Cell(span: 12) { messages }
+                    }
                     Cell(span: 12) { briefing }
                     Cell(span: 12) { console }
                     Cell(span: 12) { machine }
@@ -121,7 +121,21 @@ struct SettingsView: View {
             }
             .frame(maxWidth: HT.cw * 124, alignment: .leading)
         }
-        .task { await loadAllowlist() }
+    }
+
+    private var features: some View {
+        Panel(title: "Features") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(ConsoleFeature.allCases, id: \.self) { feature in
+                    ToggleRow(label: ConsoleNav.label(feature.rawValue),
+                              on: settings.isEnabled(feature)) {
+                        settings.setEnabled(!settings.isEnabled(feature), for: feature)
+                    }
+                }
+                SettingsNote("Choose which features are available in Charon on this Mac. "
+                             + "Pi services and Charon Bridge run independently.")
+            }
+        }
     }
 
     // MARK: - the mail program
@@ -267,7 +281,7 @@ struct SettingsView: View {
 
                 ActionRow(label: "allow a chat", title: adding ? "cancel" : "add") {
                     adding.toggle()
-                    if adding { Task { await loadAllowlist() } }
+                    if adding { allowlistRefresh += 1 }
                 }
                 if adding {
                     ChoiceRow(label: "chat",
@@ -290,6 +304,7 @@ struct SettingsView: View {
                           disabled: bridgeApp == nil, act: revealBridge)
             }
         }
+        .task(id: allowlistRefresh) { await loadAllowlist() }
     }
 
     /// A heartbeat inside the collector's own window. `absent` rather than
@@ -364,14 +379,20 @@ struct SettingsView: View {
     // same thing. A refusal restores what the Pi still believes.
 
     private func loadAllowlist() async {
+        guard settings.isEnabled(.messages), !Task.isCancelled else { return }
         do {
-            config = try await model.store.config() ?? MessagesConfig()
+            let latest = try await model.store.config()
+            guard settings.isEnabled(.messages), !Task.isCancelled else { return }
+            config = latest ?? MessagesConfig()
             allowFault = nil
         } catch {
+            guard settings.isEnabled(.messages), !Task.isCancelled else { return }
             allowFault = "the allowlist could not be read: "
                 + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
-        known = await model.store.chats() ?? []
+        let chats = await model.store.chats()
+        guard settings.isEnabled(.messages), !Task.isCancelled else { return }
+        known = chats ?? []
     }
 
     private func set(_ guid: String, _ edit: (inout MessagesChatPolicy) -> Void) {
@@ -456,8 +477,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ChoiceRow(label: "open the console on",
                           value: ConsoleNav.label(settings.landing),
-                          options: tabs) { picked in
-                    if let item = ConsoleNav.items.first(where: { $0.label == picked }) {
+                          options: settings.availableTabs.map(\.label)) { picked in
+                    if let item = settings.availableTabs.first(where: { $0.label == picked }) {
                         settings.landingTab = item.id
                     }
                 }

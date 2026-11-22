@@ -98,6 +98,7 @@ struct ConsoleShellView: View {
     private var collapsed: Bool { inTheWay && pinned != here }
 
     var body: some View {
+        @Bindable var model = model
         HStack(spacing: 0) {
             // The rail or the strip, and the same answer whether or not a
             // payload has landed: the rail appearing when the first poll
@@ -152,7 +153,13 @@ struct ConsoleShellView: View {
         // The Window menu and the title bar read this. One destination, one
         // name, and no second opinion about where you are.
         .navigationTitle(ConsoleNav.label(tab))
+        .onChange(of: settings.isTabAvailable(tab)) { _, available in
+            if !available { tab = "overview" }
+        }
         .environment(\.consoleVisible, windowVisible)
+        .sheet(isPresented: $model.showingConnection) {
+            ConnectionSheet(model: model)
+        }
         .task {
             dismissals.bind(model)
             await model.refresh()
@@ -207,7 +214,7 @@ struct ConsoleShellView: View {
                     pinned = nil
                 })
                 : nil,
-            items: ConsoleNav.items,
+            items: settings.availableTabs,
             active: tab,
             onSelect: { tab = $0 },
             footer: AnyView(railFooter))
@@ -272,11 +279,7 @@ struct ConsoleShellView: View {
     /// ⌘K and the rail's own numbers. Everything else in this window is a
     /// binding the tab that owns it declares.
     ///
-    /// The numbers are taken from the rail's list rather than written out, so a
-    /// destination added or cut moves its key with it and no numbering can go
-    /// stale. Eight is not a rule here: it is however many `ConsoleNav.items`
-    /// currently has, and a ninth would simply not get one -- ⌘0 is the system's
-    /// and a two-digit chord is not a shortcut anybody uses.
+    /// Keep each destination's usual number when another feature is turned off.
     ///
     /// Drawn the way ⌘K is drawn, which is not at all: transparent, out of the
     /// hit test and out of the accessibility tree, because the visible control
@@ -287,9 +290,11 @@ struct ConsoleShellView: View {
                 .keyboardShortcut("k", modifiers: .command)
 
             ForEach(Array(ConsoleNav.items.enumerated()), id: \.element.id) { i, item in
-                Button(item.label) { tab = item.id }
-                    .keyboardShortcut(KeyEquivalent(Character(String(i + 1))),
-                                      modifiers: .command)
+                if settings.isTabAvailable(item.id) {
+                    Button(item.label) { tab = item.id }
+                        .keyboardShortcut(KeyEquivalent(Character(String(i + 1))),
+                                          modifiers: .command)
+                }
             }
         }
         .opacity(0)
@@ -307,6 +312,8 @@ struct ConsoleShellView: View {
             // for a missing one to withhold -- and under the guard the page
             // would be unreachable in exactly the state somebody needs it in.
             console { SettingsView(model: model) }
+        } else if tab == "overview" {
+            console { overview }
         } else if model.payload == nil {
             console { connecting }
         } else if tab == "mail" {
@@ -343,13 +350,17 @@ struct ConsoleShellView: View {
             case "jarvis":
                 JarvisTabView(model: model)
             default:
-                // Overview is the default rather than a case, which is what
-                // makes an unrecognised destination land somewhere obviously
-                // not-that instead of on a blank pane.
-                ConsoleView(payload: payload, feedDown: feedDown, now: model.now,
-                            base: model.connection.url, bearer: bearerToken)
+                overview
             }
         }
+    }
+
+    private var overview: some View {
+        let connection = model.connection
+        let profile = OverviewLayoutStore.profileKey(isDemo: connection.mode == .demo, collectorURL: connection.url)
+        return ConsoleView(profileKey: profile, isDemo: connection.mode == .demo, payload: model.payload, connectionError: model.error,
+                           feedDown: feedDown, now: model.now, base: model.connection.url, bearer: bearerToken)
+            .id(profile)
     }
 
     private var bearerToken: String? {

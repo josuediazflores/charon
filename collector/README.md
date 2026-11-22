@@ -77,6 +77,12 @@ That is a configuration statement, not a failure, and a client should draw it
 as "not wired" rather than as an error. So this runs fine with none of the
 optional secrets set, and you can add them one at a time.
 
+## Supplying data to an Overview widget
+
+A Mac user can map a reading from a small JSON document to a card. For example, an existing read-only feed returning `{"tank":{"liters":42,"history":[36,39,42]}}` can supply a gauge from **tank › liters** or a trend from **tank › history**. Keep field names and value types stable across requests. The Mac stores the mapping and layout.
+
+Charon's built-in telemetry presets use its authenticated collector connection. The custom JSON URL reader sends no collector token. For a protected source, use a built-in metric when it fits or paste a sanitized JSON snapshot. The [agent widget design guide](../mac/Resources/WidgetHelp/AGENT-WIDGET-DESIGN.md) explains the supported formats and how to add a provider in Swift.
+
 ## Endpoints
 
 | method | path | auth | returns |

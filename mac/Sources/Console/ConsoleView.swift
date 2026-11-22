@@ -15,7 +15,11 @@ import SwiftUI
 */
 
 struct ConsoleView: View {
-    var payload: TelemetryPayload
+    var profileKey: String
+    var isDemo: Bool
+    @State private var history = OverviewMetricHistory()
+    var payload: TelemetryPayload?
+    var connectionError: String?
     var feedDown: Bool
     /// The clock every relative time on this page is measured from. Moved by
     /// the poll, never read from `Date()` inside a row.
@@ -32,10 +36,10 @@ struct ConsoleView: View {
     /// different element in the same pass. No `.id`, no relaunch.
     private let settings = ConsoleSettings.shared
 
-    private var cam: CameraData? { payload.camera?.data }
-    private var ph: PiholeData? { payload.pihole?.data }
-    private var nd: NodesData? { payload.nodes?.data }
-    private var cm: CommitsData? { payload.commits?.data }
+    private var cam: CameraData? { payload?.camera?.data }
+    private var ph: PiholeData? { payload?.pihole?.data }
+    private var nd: NodesData? { payload?.nodes?.data }
+    private var cm: CommitsData? { payload?.commits?.data }
 
     /// Every node the collector could not reach. The subtitle names them, the
     /// nodes panel counts them, and neither invents the rule for what
@@ -43,44 +47,69 @@ struct ConsoleView: View {
     private var faults: [NodeRow] { (nd?.nodes ?? []).filter { !$0.connected } }
 
     var body: some View {
-        // The console's own 16pt column gap, stated here because this view is
-        // one child of the shell's scroller and owns the spacing between its
-        // three blocks.
-        VStack(alignment: .leading, spacing: HT.row) {
-            Masthead(user: "operator", host: "halftone",
-                     rows: mastheadRows,
-                     // Whatever Settings says stands in the identity slot, at
-                     // whatever width it says. `MastheadArt` owns which element
-                     // that is -- this view is composition only -- and it hands
-                     // back nil for `none`, which is the same nil the slot
-                     // already understands: the art column goes and the
-                     // identity block stands alone, exactly as it does at 720.
-                     art: settings.masthead.view(cols: settings.mastheadCols,
-                                                 imageFile: settings.mastheadImageFile),
-                     swatches: false)
-
-            PageHead(title: Fmt.longDate(now), subtitle: subtitle)
-
-            HTGrid {
-                piholeCell
-                nodesCell
-                stillnessCell
-                commitsCell
-                cameraCell
-                blockingCell
-                plateCell
-                Cell(span: 12) {
-                    MastheadStrip(legend: feedDown ? "Offline" : "Live", signal: !feedDown)
+        OverviewDashboard(profileKey: profileKey, isDemo: isDemo) { entry, isEditing, updateManualValue in
+            if let widget = entry.widget {
+                if payload == nil && [.pihole, .nodes, .stillness, .commits, .camera, .blocking].contains(widget) {
+                    Panel(title: widget.title) {
+                        Text(connectionError == nil ? "Waiting for telemetry." : "Collector unavailable.")
+                            .font(HT.body)
+                            .foregroundStyle(HT.inkDim)
+                    }
+                } else {
+                    widgetBody(widget, config: entry.configuration, isEditing: isEditing,
+                               updateManualValue: updateManualValue)
                 }
             }
         }
+        .onChange(of: payload, initial: true) { _, latest in history.observe(latest, feedDown: feedDown) }
+        .onChange(of: feedDown) { _, down in history.observe(payload, feedDown: down) }
+    }
+
+    @ViewBuilder
+    private func widgetBody(_ widget: OverviewWidget, config: OverviewWidgetConfig, isEditing: Bool,
+                            updateManualValue: @escaping (Double) -> Void) -> some View {
+        switch widget {
+        case .weather, .quakes:
+            OverviewFeedWidget(kind: widget, config: config, isDemo: isDemo, allowNetwork: !isEditing)
+        case .metric:
+            OverviewTelemetryMetric(config: config, payload: payload, feedDown: feedDown, history: history)
+        case .progress:
+            OverviewProgressWidget(config: config, payload: payload, feedDown: feedDown,
+                                   isEditing: isEditing, updateManualValue: updateManualValue)
+        case .custom:
+            if let spec = config.custom {
+                CustomWidgetView(spec: spec, isEditing: isEditing, isDemo: isDemo)
+            }
+        case .identity: identity
+        case .date: PageHead(title: Fmt.longDate(now), subtitle: subtitle)
+        case .pihole: piholeCell
+        case .nodes: nodesCell
+        case .stillness: stillnessCell
+        case .commits: commitsCell
+        case .camera: cameraCell
+        case .blocking: blockingCell
+        case .artwork: plateCell
+        case .status:
+            MastheadStrip(legend: feedDown ? "Offline" : "Live", signal: !feedDown)
+        }
+    }
+
+    private var identity: some View {
+        Masthead(user: "operator", host: "halftone",
+                 rows: mastheadRows,
+                 art: settings.masthead.view(cols: settings.mastheadCols,
+                                             imageFile: settings.mastheadImageFile),
+                 swatches: false)
     }
 
     // MARK: - the identity block
 
     private var mastheadRows: [MastheadRow] {
-        [
-            MastheadRow("collector", "up \(Fmt.dur(payload.collector?.uptimeS))"),
+        guard payload != nil else {
+            return [MastheadRow("collector", connectionError == nil ? "connecting" : "offline", tone: .caution)]
+        }
+        return [
+            MastheadRow("collector", "up \(Fmt.dur(payload?.collector?.uptimeS))"),
             MastheadRow("nodes",
                         nd.map { "\($0.connected) of \($0.total) connected" } ?? "—",
                         tone: (nd?.connected ?? 0) < (nd?.total ?? 0) ? .caution : .nominal),
@@ -101,7 +130,7 @@ struct ConsoleView: View {
     /// "2 ok · 1 not wired" over four sources, and the one in trouble was the
     /// one it left out.
     private var sourceWords: String {
-        let h = payload.health
+        let h = payload?.health
         let buckets: [(Int, String)] = [
             (h?.ok ?? 0, "ok"),
             (h?.degraded ?? 0, "degraded"),
@@ -114,13 +143,14 @@ struct ConsoleView: View {
     }
 
     private var sourceTone: Tone {
-        let h = payload.health
+        let h = payload?.health
         if (h?.error ?? 0) > 0 { return .fault }
         if (h?.stale ?? 0) > 0 || (h?.degraded ?? 0) > 0 { return .caution }
         return .default
     }
 
     private var subtitle: String {
+        if payload == nil { return connectionError ?? "Waiting for the first reading." }
         if feedDown { return "Collector unreachable. Showing the last values received." }
         guard !faults.isEmpty else { return "All sources reporting." }
         let plural = faults.count > 1 ? "s" : ""
@@ -131,29 +161,27 @@ struct ConsoleView: View {
     // MARK: - ads blocked
 
     private var piholeCell: some View {
-        Cell(span: 4, spanMd: 6) {
-            SourcePanel(env: payload.pihole, feedDown: feedDown,
-                        title: "Pi-hole", meta: "pi-zero-w") { h in
-                VStack(alignment: .leading, spacing: 0) {
-                    Metric(
-                        label: "ads blocked today",
-                        value: Fmt.num(ph?.blockedToday),
-                        // Not a Delta. The block rate is a ratio, not a change,
-                        // and a Delta renders an arrow and the word "up" -- so
-                        // feeding it 31.0% would claim blocking had risen by a
-                        // third when it simply was a third. Nothing upstream
-                        // reports a prior period, so there is no honest delta
-                        // to draw here.
-                        footer: AnyView(
-                            Text("\(Fmt.pct(ph?.blockRatePct)) of \(Fmt.num(ph?.queriesToday)) queries")
-                                .htDemoted(h.dim)),
-                        dim: h.dim)
+        SourcePanel(env: payload?.pihole, feedDown: feedDown,
+                    title: "Pi-hole", meta: "pi-zero-w") { h in
+            VStack(alignment: .leading, spacing: 0) {
+                Metric(
+                    label: "ads blocked today",
+                    value: Fmt.num(ph?.blockedToday),
+                    // Not a Delta. The block rate is a ratio, not a change,
+                    // and a Delta renders an arrow and the word "up" -- so
+                    // feeding it 31.0% would claim blocking had risen by a
+                    // third when it simply was a third. Nothing upstream
+                    // reports a prior period, so there is no honest delta
+                    // to draw here.
+                    footer: AnyView(
+                        Text("\(Fmt.pct(ph?.blockRatePct)) of \(Fmt.num(ph?.queriesToday)) queries")
+                            .htDemoted(h.dim)),
+                    dim: h.dim)
 
-                    SegBar(value: ph?.blockRatePct ?? 0,
-                           tone: h.dim ? .standby : .nominal,
-                           label: "rate", block: true)
-                        .padding(.top, HT.row)
-                }
+                SegBar(value: ph?.blockRatePct ?? 0,
+                       tone: h.dim ? .standby : .nominal,
+                       label: "rate", block: true)
+                    .padding(.top, HT.row)
             }
         }
     }
@@ -161,35 +189,33 @@ struct ConsoleView: View {
     // MARK: - nodes
 
     private var nodesCell: some View {
-        Cell(span: 4, spanMd: 6) {
-            SourcePanel(env: payload.nodes, feedDown: feedDown, title: "Nodes") { h in
-                VStack(alignment: .leading, spacing: 0) {
-                    Metric(
-                        label: "nodes connected",
-                        value: nd.map { "\($0.connected)" } ?? "—",
-                        unit: nd.map { "of \($0.total)" },
-                        footer: AnyView(
-                            Text(faults.isEmpty
-                                 ? "all answering"
-                                 : "\(faults.map(\.host).joined(separator: ", ")) offline")
-                                .foregroundStyle(HT.inkDim)),
-                        tone: (nd?.connected ?? 0) < (nd?.total ?? 0) ? .caution : .default,
-                        dim: h.dim)
+        SourcePanel(env: payload?.nodes, feedDown: feedDown, title: "Nodes") { h in
+            VStack(alignment: .leading, spacing: 0) {
+                Metric(
+                    label: "nodes connected",
+                    value: nd.map { "\($0.connected)" } ?? "—",
+                    unit: nd.map { "of \($0.total)" },
+                    footer: AnyView(
+                        Text(faults.isEmpty
+                             ? "all answering"
+                             : "\(faults.map(\.host).joined(separator: ", ")) offline")
+                            .foregroundStyle(HT.inkDim)),
+                    tone: (nd?.connected ?? 0) < (nd?.total ?? 0) ? .caution : .default,
+                    dim: h.dim)
 
-                    // A meter per machine the collector is itself running on:
-                    // those are the only ones that can report a load average,
-                    // because the others are reached over a socket.
-                    VStack(alignment: .leading, spacing: HT.s1) {
-                        ForEach((nd?.nodes ?? []).filter { $0.probe == "self" }) { n in
-                            SegBar(value: Swift.min(100, (n.load1 ?? 0) * 100),
-                                   tone: h.dim ? .standby : .nominal,
-                                   label: "cpu",
-                                   readout: n.load1.map { String(format: "%.2f", $0) } ?? "—",
-                                   block: true)
-                        }
+                // A meter per machine the collector is itself running on:
+                // those are the only ones that can report a load average,
+                // because the others are reached over a socket.
+                VStack(alignment: .leading, spacing: HT.s1) {
+                    ForEach((nd?.nodes ?? []).filter { $0.probe == "self" }) { n in
+                        SegBar(value: Swift.min(100, (n.load1 ?? 0) * 100),
+                               tone: h.dim ? .standby : .nominal,
+                               label: "cpu",
+                               readout: n.load1.map { String(format: "%.2f", $0) } ?? "—",
+                               block: true)
                     }
-                    .padding(.top, HT.row)
                 }
+                .padding(.top, HT.row)
             }
         }
     }
@@ -204,31 +230,29 @@ struct ConsoleView: View {
     /// and footer still report the staleness, because `SourcePanel` draws those
     /// whatever the body does.
     private var stillnessCell: some View {
-        Cell(span: 4, spanMd: 12) {
-            SourcePanel(env: payload.camera, feedDown: feedDown,
-                        title: "Stillness", meta: "raspberrypi") { _ in
-                VStack(alignment: .leading, spacing: 0) {
-                    Metric(
-                        label: cam?.display.verdict.label ?? "stillness",
-                        value: cam?.display.verdict.value ?? "no reading",
-                        footer: AnyView(
-                            Text("last sample \(Fmt.relTime(cam?.lastSample, now: now))")
-                                .foregroundStyle(HT.inkDim)),
-                        tone: cam?.display.verdict.tone ?? .standby,
-                        size: .compact)
+        SourcePanel(env: payload?.camera, feedDown: feedDown,
+                    title: "Stillness", meta: "raspberrypi") { _ in
+            VStack(alignment: .leading, spacing: 0) {
+                Metric(
+                    label: cam?.display.verdict.label ?? "stillness",
+                    value: cam?.display.verdict.value ?? "no reading",
+                    footer: AnyView(
+                        Text("last sample \(Fmt.relTime(cam?.lastSample, now: now))")
+                            .foregroundStyle(HT.inkDim)),
+                    tone: cam?.display.verdict.tone ?? .standby,
+                    size: .compact)
 
-                    VStack(alignment: .leading, spacing: 0) {
-                        DotLeader(label: "monitor",
-                                  value: (cam?.monitor.alive ?? false) ? "running" : "not running",
-                                  tone: (cam?.monitor.alive ?? false) ? .nominal : .fault)
-                        DotLeader(label: "camera feed",
-                                  value: (cam?.monitor.feedOk ?? false)
-                                      ? "up"
-                                      : "down \(Fmt.dur(cam?.monitor.feedDownForS))",
-                                  tone: (cam?.monitor.feedOk ?? false) ? .nominal : .fault)
-                    }
-                    .padding(.top, HT.row)
+                VStack(alignment: .leading, spacing: 0) {
+                    DotLeader(label: "monitor",
+                              value: (cam?.monitor.alive ?? false) ? "running" : "not running",
+                              tone: (cam?.monitor.alive ?? false) ? .nominal : .fault)
+                    DotLeader(label: "camera feed",
+                              value: (cam?.monitor.feedOk ?? false)
+                                  ? "up"
+                                  : "down \(Fmt.dur(cam?.monitor.feedDownForS))",
+                              tone: (cam?.monitor.feedOk ?? false) ? .nominal : .fault)
                 }
+                .padding(.top, HT.row)
             }
         }
     }
@@ -236,30 +260,28 @@ struct ConsoleView: View {
     // MARK: - recent commits
 
     private var commitsCell: some View {
-        Cell(span: 7, spanMd: 12) {
-            VStack(alignment: .leading, spacing: 0) {
-                SourcePanel(env: payload.commits, feedDown: feedDown,
-                            title: "Recent commits", icon: "⌗",
-                            meta: cm.map { "last \($0.commits.count)" },
-                            flush: true) { _ in
-                    DataTable(columns: commitColumns,
-                              rows: cm?.commits ?? [],
-                              empty: payload.commits?.status == .dormant
-                                  ? "Not wired. Add a fine-grained GitHub token to the collector."
-                                  : "No commits")
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            SourcePanel(env: payload?.commits, feedDown: feedDown,
+                        title: "Recent commits", icon: "⌗",
+                        meta: cm.map { "last \($0.commits.count)" },
+                        flush: true) { _ in
+                DataTable(columns: commitColumns,
+                          rows: cm?.commits ?? [],
+                          empty: payload?.commits?.status == .dormant
+                              ? "Not wired. Add a fine-grained GitHub token to the collector."
+                              : "No commits")
+            }
 
-                // Under the panel rather than in it: this is a caveat about the
-                // table above, not a row of it.
-                if let cm, !cm.reposUntracked.isEmpty {
-                    Text("\(cm.reposUntracked.count) repo\(cm.reposUntracked.count > 1 ? "s" : "") "
-                         + "not on GitHub (\(cm.reposUntracked.joined(separator: ", "))), "
-                         + "not counted above.")
-                        .font(HT.body)
-                        .foregroundStyle(HT.inkDim)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, HT.row)
-                }
+            // Under the panel rather than in it: this is a caveat about the
+            // table above, not a row of it.
+            if let cm, !cm.reposUntracked.isEmpty {
+                Text("\(cm.reposUntracked.count) repo\(cm.reposUntracked.count > 1 ? "s" : "") "
+                     + "not on GitHub (\(cm.reposUntracked.joined(separator: ", "))), "
+                     + "not counted above.")
+                    .font(HT.body)
+                    .foregroundStyle(HT.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, HT.row)
             }
         }
     }
@@ -283,27 +305,25 @@ struct ConsoleView: View {
     // MARK: - the dog camera
 
     private var cameraCell: some View {
-        Cell(span: 5, spanMd: 12) {
-            VStack(alignment: .leading, spacing: 0) {
-                SourcePanel(env: payload.camera, feedDown: feedDown,
-                            title: "Dog camera", glyph: .overview, ticks: true) { _ in
-                    CameraFrame(label: "Dog cam",
-                                src: frameURL,
-                                bearer: bearer,
-                                state: cam?.display.cameraState ?? .offline,
-                                stamp: Fmt.clock(cam?.display.stamp),
-                                verdict: verdict,
-                                refreshSeconds: 10,
-                                aspect: 16.0 / 10.0)
-                }
-
-                Text("Stillness, not sleep. A motionless awake dog reads as still, "
-                     + "and an empty pen can read as still.")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkDim)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, HT.row)
+        VStack(alignment: .leading, spacing: 0) {
+            SourcePanel(env: payload?.camera, feedDown: feedDown,
+                        title: "Dog camera", glyph: .overview, ticks: true) { _ in
+                CameraFrame(label: "Dog cam",
+                            src: frameURL,
+                            bearer: bearer,
+                            state: cam?.display.cameraState ?? .offline,
+                            stamp: Fmt.clock(cam?.display.stamp),
+                            verdict: verdict,
+                            refreshSeconds: 10,
+                            aspect: 16.0 / 10.0)
             }
+
+            Text("Stillness, not sleep. A motionless awake dog reads as still, "
+                 + "and an empty pen can read as still.")
+                .font(HT.body)
+                .foregroundStyle(HT.inkDim)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, HT.row)
         }
     }
 
@@ -326,19 +346,17 @@ struct ConsoleView: View {
     // MARK: - blocking
 
     private var blockingCell: some View {
-        Cell(span: 5, spanMd: 12) {
-            SourcePanel(env: payload.pihole, feedDown: feedDown,
-                        title: "Blocking", icon: "⊘", ticks: true) { h in
-                VStack(alignment: .leading, spacing: 0) {
-                    DotLeader(label: "queries today", value: Fmt.num(ph?.queriesToday))
-                    DotLeader(label: "blocked today", value: Fmt.num(ph?.blockedToday),
-                              tone: h.dim ? .standby : .nominal)
-                    DotLeader(label: "block rate", value: Fmt.pct(ph?.blockRatePct))
-                    DotLeader(label: "domains on list", value: Fmt.num(ph?.domainsOnList))
-                    DotLeader(label: "clients", value: Fmt.num(ph?.clientsActive))
-                    Rule(variant: .dotted)
-                    DotLeader(label: "top blocked", value: ph?.topBlocked ?? "—")
-                }
+        SourcePanel(env: payload?.pihole, feedDown: feedDown,
+                    title: "Blocking", icon: "⊘", ticks: true) { h in
+            VStack(alignment: .leading, spacing: 0) {
+                DotLeader(label: "queries today", value: Fmt.num(ph?.queriesToday))
+                DotLeader(label: "blocked today", value: Fmt.num(ph?.blockedToday),
+                          tone: h.dim ? .standby : .nominal)
+                DotLeader(label: "block rate", value: Fmt.pct(ph?.blockRatePct))
+                DotLeader(label: "domains on list", value: Fmt.num(ph?.domainsOnList))
+                DotLeader(label: "clients", value: Fmt.num(ph?.clientsActive))
+                Rule(variant: .dotted)
+                DotLeader(label: "top blocked", value: ph?.topBlocked ?? "—")
             }
         }
     }
@@ -349,10 +367,8 @@ struct ConsoleView: View {
     /// it, which is exactly what lets it carry the two numbers as a caption
     /// instead of as a panel.
     private var plateCell: some View {
-        Cell(span: 7, spanMd: 12) {
-            DitherPlate(pattern: .sphere, scale: 3, aspect: 16.0 / 7.0,
-                        caption: plateCaption)
-        }
+        DitherPlate(pattern: .sphere, scale: 3, aspect: 16.0 / 7.0,
+                    caption: plateCaption)
     }
 
     private var plateCaption: String {

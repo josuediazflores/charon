@@ -123,6 +123,39 @@ Global keys: only ⌘K (CommandField focus). Theme: single dark, no toggle.
 
 ### 2. Overview (ConsoleView.tsx, 318 lines)
 
+The native app uses the composition below as its initial layout. **Edit Overview**
+lets the user resize, reorder, remove and add back any of the ten widgets,
+including the masthead and date. Save keeps the layout on this Mac for the
+current collector or demo profile. Cancel discards the draft. A saved empty
+dashboard stays empty and offers Add Widget.
+
+**Custom widget** opens a visual picker for Number, Progress bar, Gauge, Status,
+Trend, List and Key and value. Each display accepts manual input, a pasted JSON
+snapshot or a tested keyless JSON URL. Compatible fields appear in a picker.
+Preview renders the chosen field before Add. Each instance keeps its own title,
+scale, source and width. URL widgets store the URL and selected field on this Mac.
+An explicit test can read a user-supplied URL in Demo. Saved Demo cards require
+Refresh to fetch it again. Setup requests omit widget values and addresses.
+
+Four presets also support multiple configured instances. In Edit
+Overview, choose Add Widget, select a type and complete the form. To change a
+card, choose Setup, then Apply. Save keeps the layout and its configured sources on this Mac.
+
+- Weather forecast uses NWS hourly periods for a user-selected US location.
+- Recent earthquakes filters the USGS past-day catalog by place, radius and
+  minimum magnitude. It shows reported events.
+- Metric with sparkline reads a named collector or Pi-hole field. The chart
+  grows with distinct successful samples while Overview is open.
+- Progress bar tracks a local goal or an existing collector ratio. Update on
+  a saved manual goal changes its current value without reopening the editor.
+
+Place search and manual coordinates are both supported. Demo uses fixtures.
+Live feed cards can refresh when opened and when the user presses Refresh.
+Copy setup request includes the selected widget, the current mode, and the
+[bundled widget setup guide](Resources/WidgetHelp/AGENTS.md). The user
+chooses where to paste it and saves the configuration in Charon.
+
+
 Reads camera/pihole/nodes/commits (+ collector, health). NOT cmo, mail,
 healthchecks. faults = nodes where !connected.
 

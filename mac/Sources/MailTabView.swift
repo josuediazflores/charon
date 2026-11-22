@@ -46,7 +46,7 @@ extension EnvironmentValues {
 
 struct MailTabView: View {
 
-    @Bindable var model: MailModel
+    var model: MailModel
     @FocusState private var keyboardHeld: Bool
 
     /// The standing rule's height, measured and handed to the reader.
@@ -109,9 +109,6 @@ struct MailTabView: View {
         // per message -- until the first time somebody typed.
         .onChange(of: model.textFocused) { _, typing in
             if !typing { keyboardHeld = true }
-        }
-        .sheet(isPresented: $model.showingConnection) {
-            ConnectionSheet(model: model)
         }
     }
 

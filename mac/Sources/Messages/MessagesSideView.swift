@@ -22,7 +22,7 @@ import SwiftUI
 struct MessagesSideView: View {
 
     let model: MailModel
-    let settings: ConsoleSettings
+    let showsAgent: Bool
     let route: MessagesRoute?
     let agentUnread: Bool
     let agentWhen: String
@@ -39,11 +39,12 @@ struct MessagesSideView: View {
 
                 counts(chats: chats)
 
-                VStack(spacing: 2) { pinnedRow }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 7)
-
-                Hairline().padding(.horizontal, 8)
+                if showsAgent {
+                    pinnedRow
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 7)
+                    Hairline().padding(.horizontal, 8)
+                }
 
                 if chats.isEmpty {
                     empty(health: health)

@@ -49,7 +49,7 @@ struct ChatLandingView: View {
     var narrow: Bool
     var navigate: (ChatRoute) -> Void
 
-    @State private var threads: [ChatThreadSummary]?
+    @State private var allThreads: [ChatThreadSummary]?
     @State private var loading = true
     /// What the reader is in the middle of doing to the list. Held here rather
     /// than in the section, because the door into that mode is drawn up on the
@@ -102,6 +102,12 @@ struct ChatLandingView: View {
     /// puts the rest of the stack back on the grid without inventing a number.
     private static let afterBox: CGFloat = HT.s3
 
+    private var threads: [ChatThreadSummary]? {
+        let settings = ConsoleSettings.shared
+        guard !settings.isEnabled(.messages) else { return allThreads }
+        return allThreads?.filter { $0.id != settings.messagesAgentThreadId }
+    }
+
     /// The list proper. Archived rows are not in it -- they are a section of
     /// their own below -- and neither is the count on the chip: "12 sessions"
     /// that included six the reader put away is counting the wrong thing.
@@ -149,6 +155,9 @@ struct ChatLandingView: View {
             .focusEffectDisabled()
             .focused($keys)
             .onKeyPress(phases: .down) { press in key(press) }
+            .onChange(of: threads) { _, rows in
+                if let rows { pick.reconcile(rows) }
+            }
             .task(id: fresh) { await mintIfFresh() }
             // `fresh` is in the key as well as the window's own state: a mint
             // that the collector refused lands back on this route in the same
@@ -467,9 +476,8 @@ struct ChatLandingView: View {
     private func load() async {
         let rows = await model.store.chatList()
         if Task.isCancelled { return }
-        threads = rows
+        allThreads = rows
         loading = false
-        if let rows { pick.reconcile(rows) }
     }
 
     // MARK: - the keys

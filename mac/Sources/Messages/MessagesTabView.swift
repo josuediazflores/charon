@@ -69,6 +69,7 @@ struct MessagesTabView: View {
     @State private var cleared = false
 
     private var agentId: String { settings.messagesAgentThreadId }
+    private var showsAgent: Bool { settings.isEnabled(.chat) && settings.isEnabled(.messages) }
 
     private var agentLive: Bool {
         guard let agent else { return false }
@@ -78,7 +79,7 @@ struct MessagesTabView: View {
     /// The last thing in the conversation is the agent's, and nobody is looking
     /// at it. The same dot a chat gets for the same reason.
     private var agentUnread: Bool {
-        guard route != .agent, let last = agent?.turns.last else { return false }
+        guard showsAgent, route != .agent, let last = agent?.turns.last else { return false }
         return last.role == .assistant
     }
 
@@ -135,6 +136,9 @@ struct MessagesTabView: View {
         .onKeyPress(phases: .down) { press in handle(press) }
         .task { keyboardHeld = true }
         .task(id: agentPollKey) { await watchAgent() }
+        .onChange(of: showsAgent) { _, enabled in
+            if !enabled && route == .agent { route = nil }
+        }
         .onChange(of: model.textFocused) { _, typing in
             if !typing { keyboardHeld = true }
         }
@@ -198,10 +202,10 @@ struct MessagesTabView: View {
         .frame(minHeight: 52)
     }
 
-    /// The bar counts what the column lists, and the column lists Charon.
+    /// The pinned assistant counts as a conversation when it is shown.
     private var barCount: String {
         guard let counts = model.messagesCounts else { return "no bridge report yet" }
-        let n = counts.chats + 1
+        let n = counts.chats + (showsAgent ? 1 : 0)
         let unread = model.messageChats.reduce(0) { $0 + model.unreadCount($1) }
             + (agentUnread ? 1 : 0)
         return "\(Fmt.num(n)) chat\(n == 1 ? "" : "s") · \(Fmt.num(unread)) unread"
@@ -238,7 +242,7 @@ struct MessagesTabView: View {
 
     private var side: some View {
         MessagesSideView(model: model,
-                         settings: settings,
+                         showsAgent: showsAgent,
                          route: route,
                          agentUnread: agentUnread,
                          agentWhen: agentWhen,
@@ -258,13 +262,13 @@ struct MessagesTabView: View {
                                replyRequests: replyRequests,
                                draftRequests: draftRequests)
                 .id(key)
-        case .agent:
+        case .agent where showsAgent:
             MessagesAgentView(model: model, doc: agent, missing: agentMissing,
                               sending: sending, failed: sendFailed,
                               allowlisted: allowlisted,
                               onSend: { text in Task { await fileToAgent(text) } },
                               onClear: { Task { await clearAgent() } })
-        case nil:
+        case .agent, nil:
             VStack {
                 EmptyPane(glyph: .messages, line: "Select a chat",
                           why: model.messageChats.isEmpty ? nil : "j and k walk the column")
@@ -286,12 +290,12 @@ struct MessagesTabView: View {
     /// as long as the tab was open. Sending mints one and clears the flag,
     /// which is what brings the poll back.
     private var agentPollKey: String {
-        "\(model.active)/\(route == .agent)/\(agentLive || sending != nil)"
+        "\(showsAgent)/\(model.active)/\(route == .agent)/\(agentLive || sending != nil)"
             + "/\(agentId)/\(cleared)/\(agentMissing)"
     }
 
     private func watchAgent() async {
-        guard model.active, !cleared, !agentMissing else { return }
+        guard showsAgent, model.active, !cleared, !agentMissing else { return }
 
         // Off screen this is read once and not again. The row in the column
         // needs something to draw, which is why it is read at all; the repeat
@@ -316,7 +320,7 @@ struct MessagesTabView: View {
     }
 
     private func loadAgent() async {
-        guard !cleared else { return }
+        guard showsAgent, !cleared else { return }
         do {
             let got = try await model.store.chatThread(id: agentId)
             if Task.isCancelled { return }
@@ -350,6 +354,7 @@ struct MessagesTabView: View {
     /// first, and only when he did not type it himself: a tag on every turn
     /// would be the app arguing with the conversation.
     private func fileToAgent(_ text: String) async {
+        guard showsAgent else { return }
         sendFailed = nil
         var body = text
         let fresh = (agent?.turns.isEmpty ?? true)
@@ -368,6 +373,7 @@ struct MessagesTabView: View {
             settings.messagesAgentThreadId = minted
             cleared = false
             agentMissing = false
+            guard showsAgent else { return }
         }
 
         sentBaseline = agent.map(userTurns) ?? 0
@@ -388,6 +394,7 @@ struct MessagesTabView: View {
     }
 
     private func clearAgent() async {
+        guard showsAgent else { return }
         _ = await model.store.chatDelete(id: agentId)
         agent = nil
         agentMissing = true
@@ -403,10 +410,8 @@ struct MessagesTabView: View {
     /// in. Derived rather than held: the list decides the order, and reading
     /// its own array back is what keeps the keys agreeing with the screen.
     private var walk: [MessagesRoute] {
-        var out: [MessagesRoute] = []
-        out.append(.agent)
-        out += model.messageChats.map { MessagesRoute.chat($0.chatKey) }
-        return out
+        let chats = model.messageChats.map { MessagesRoute.chat($0.chatKey) }
+        return showsAgent ? [.agent] + chats : chats
     }
 
     private func step(_ delta: Int) {

@@ -52,6 +52,9 @@ targets:
         buildPhase:
           copyFiles:
             destination: resources
+      - path: Resources/WidgetHelp
+        type: folder
+        buildPhase: resources
       - path: Resources/Fonts
         type: folder
         buildPhase: resources
