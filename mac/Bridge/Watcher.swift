@@ -28,6 +28,7 @@ actor Watcher {
     /// Events waiting for a flush, and the newest rowid seen for any reason.
     private var batch: [Event] = []
     private var streamCursor: Int?
+    private var flushing = false
     private var lastFlush = Date()
     private var blockedUntil = Date.distantPast
     private var backoff: TimeInterval = 0
@@ -120,7 +121,7 @@ actor Watcher {
         if let path = database?["path"]?.stringValue {
             await core.adopt(database: identity(of: path))
         }
-        streamCursor = await core.cursor
+        streamCursor = await core.resumeCursor
 
         try await listChats(session)
 
@@ -173,11 +174,12 @@ actor Watcher {
             log.warn("a row from the helper would not decode")
             return
         }
-        if let rowid = row.id { streamCursor = max(streamCursor ?? 0, rowid) }
-
+        if streamCursor == nil, let id = row.id { await core.rememberFirstRow(id) }
         let decision = Normalise.event(from: row,
                                        allowlist: await core.allowlist,
                                        directory: await core.directory)
+        // No suspension between including a row in the cursor and buffering it.
+        if let rowid = row.id { streamCursor = max(streamCursor ?? 0, rowid) }
         switch decision {
         case .event(let event):
             batch.append(event)
@@ -228,31 +230,31 @@ actor Watcher {
     }
 
     private func flush(force: Bool = false) async {
-        guard force || !batch.isEmpty else { return }
-        guard Date() >= blockedUntil else { return }
+        guard !flushing, force || !batch.isEmpty, Date() >= blockedUntil else { return }
+        flushing = true
+        defer { flushing = false }
 
-        let slice = Array(batch.prefix(Self.perPost))
-        let whole = slice.count == batch.count
+        let policy = await core.allowlist
+        let pending = batch.prefix(Self.perPost)
+        let count = pending.count
+        let slice = pending.filter { policy.mayRead(guid: $0.chatGuid, identifier: $0.chatIdentifier) }
+        let whole = count == batch.count
         // When the batch does not fit in one post, the cursor sent is the
         // newest rowid actually in it. Acknowledging further than we have
         // delivered would turn a crash into a gap.
         let cursor = whole ? (streamCursor ?? slice.last?.rowid ?? 0)
-                           : (slice.map(\.rowid).max() ?? 0)
+                           : (pending.map(\.rowid).max() ?? 0)
 
         do {
-            let body = JSONValue.object([
-                "protocol": .int(1),
-                "events": try JSONValue.of(slice),
-                "cursor": .int(cursor),
-            ])
-            let reply = try await collector.post("/v1/messages/ingest", body)
-            batch.removeFirst(slice.count)
+            try await collector.ingest(slice, cursor: cursor, history: false)
+            guard await core.acked(cursor: cursor, lastEventAt: slice.last?.createdAt) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            batch.removeFirst(count)
             lastFlush = Date()
             backoff = 0
             blockedUntil = .distantPast
-            let acked = reply["cursor_ack"]?.intValue ?? cursor
-            await core.acked(cursor: acked, lastEventAt: slice.last?.createdAt)
-            log.info("ingest: \(slice.count) event(s), cursor \(acked)")
+            log.info("ingest: \(slice.count) event(s), cursor \(cursor)")
             // After the ack and not before it. An attachment belongs to a
             // message the Pi holds; uploading bytes for a row the collector
             // has not accepted would be a 404 and a wasted read of the disk.

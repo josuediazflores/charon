@@ -1507,6 +1507,8 @@ struct MessageOutboxItem: Equatable, Identifiable {
     var messageId: String?
     var error: String?
     var disposition: String?
+    var retrySafe: Bool?
+    var requestID: UUID?
 
     init(id: String, status: String = "queued", body: String? = nil, at: String? = nil,
          sentAt: String? = nil, guid: String? = nil, messageId: String? = nil,
@@ -1525,12 +1527,13 @@ struct MessageOutboxItem: Equatable, Identifiable {
 
 extension MessageOutboxItem: Decodable {
     private enum K: String, CodingKey {
-        case id, status, body, at, sentAt, guid, messageId, error, disposition
+        case id, status, body, at, sentAt, guid, messageId, error, disposition, retrySafe
+        case requestID = "requestId"
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: K.self)
         id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
-        status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? "queued"
+        status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? "unknown"
         body = try? c.decodeIfPresent(String.self, forKey: .body)
         at = try? c.decodeIfPresent(String.self, forKey: .at)
         sentAt = try? c.decodeIfPresent(String.self, forKey: .sentAt)
@@ -1538,6 +1541,8 @@ extension MessageOutboxItem: Decodable {
         messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
         disposition = try? c.decodeIfPresent(String.self, forKey: .disposition)
+        retrySafe = try? c.decodeIfPresent(Bool.self, forKey: .retrySafe)
+        requestID = try? c.decodeIfPresent(UUID.self, forKey: .requestID)
     }
 }
 

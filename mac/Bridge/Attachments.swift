@@ -34,6 +34,8 @@ actor Attachments {
     /// One upload, ready to go.
     private struct Job: Sendable, Equatable {
         var key: String
+        var chatGuid: String
+        var chatIdentifier: String?
         var n: Int
         var path: String
         var filename: String
@@ -105,7 +107,8 @@ actor Attachments {
             remember(event.key, event.attachments.map { $0.originalPath ?? "" })
             guard live else { continue }
             for attachment in event.attachments where Uploads.automatic(attachment) {
-                queue.append(Job(key: event.key,
+                queue.append(Job(key: event.key, chatGuid: event.chatGuid,
+                                 chatIdentifier: event.chatIdentifier,
                                  n: attachment.n,
                                  path: attachment.originalPath ?? "",
                                  filename: attachment.filename,
@@ -155,10 +158,10 @@ actor Attachments {
         var sent = 0
         var bytes = 0
         var reachable = true
-        while reachable, let job = queue.first {
+        while reachable, !queue.isEmpty {
+            let job = queue.removeFirst()
             switch await upload(job) {
             case .ok(let size):
-                queue.removeFirst()
                 uploaded += 1
                 sent += 1
                 bytes += size
@@ -166,12 +169,14 @@ actor Attachments {
                 // Nobody asked for this one and nobody is waiting on it, so a
                 // refusal is the end of it. It can still be fetched, which is
                 // the path with the retries on it.
-                queue.removeFirst()
                 failed += 1
+            case .revoked:
+                continue
             case .unreachable:
                 // The queue stays. The Pi being down is the same event the
                 // ingest already backs off for, and the photographs are on
                 // this disk either way.
+                queue.insert(job, at: 0)
                 hold()
                 reachable = false
             }
@@ -199,6 +204,7 @@ actor Attachments {
         var bytes = 0
         var reachable = true
         for item in items where reachable {
+            guard let guid = item.chatGuid, await core.allowlist.mayRead(guid: guid) else { continue }
             let mark = "\(item.key)-\(item.n)"
             guard (tries[mark] ?? 0) < Self.triesMax else { continue }
             guard let path = await resolve(item) else {
@@ -215,7 +221,7 @@ actor Attachments {
                 }
                 continue
             }
-            let job = Job(key: item.key, n: item.n, path: path,
+            let job = Job(key: item.key, chatGuid: guid, chatIdentifier: nil, n: item.n, path: path,
                           filename: item.filename ?? "", mime: item.mimeType)
             switch await upload(job) {
             case .ok(let size):
@@ -224,6 +230,8 @@ actor Attachments {
                 bytes += size
                 tries[mark] = nil
                 told.remove(mark)
+            case .revoked:
+                continue
             case .refused:
                 failed += 1
                 let count = (tries[mark] ?? 0) + 1
@@ -247,6 +255,7 @@ actor Attachments {
 
     private enum Outcome {
         case ok(Int)
+        case revoked
         /// This file will not go up: too big, not there, or the Pi said no.
         case refused
         /// The Pi could not be reached at all. Nothing is wrong with the file.
@@ -254,6 +263,9 @@ actor Attachments {
     }
 
     private func upload(_ job: Job) async -> Outcome {
+        guard await core.allowlist.mayRead(guid: job.chatGuid, identifier: job.chatIdentifier) else {
+            return .revoked
+        }
         guard !job.path.isEmpty else { return .refused }
         let file = URL(fileURLWithPath: job.path)
         guard let (digest, size) = Digest.ofFile(at: file), size > 0 else {
@@ -278,6 +290,9 @@ actor Attachments {
             "X-Charon-SHA256": digest,
         ]
         do {
+            guard await core.allowlist.mayRead(guid: job.chatGuid, identifier: job.chatIdentifier) else {
+                return .revoked
+            }
             _ = try await collector.put(
                 "/v1/messages/attachment/\(job.key)/\(job.n)",
                 file: file, headers: headers)

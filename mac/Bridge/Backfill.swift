@@ -113,6 +113,9 @@ actor Backfill {
             current = guid
             do {
                 try await history(of: guid)
+            } catch is CancellationError {
+                current = nil
+                continue
             } catch {
                 log.warn("backfill \(Keys.of(guid)) stopped: \(error.redacted)")
             }
@@ -132,6 +135,7 @@ actor Backfill {
         var mark = await core.backfill[chatGuid]
         if mark?.done == true { return }
 
+        try await requireRead(chatGuid)
         let key = Keys.of(chatGuid)
         guard let chatId = try await chatId(of: chatGuid) else {
             log.warn("backfill \(key): the helper does not list this chat")
@@ -145,8 +149,7 @@ actor Backfill {
 
         while !Task.isCancelled, pages < Self.pageCeiling {
             let session = try await supervisor.session()
-            // No allowlist parameter and no reactions: the chat was checked
-            // before the page was asked for, and a tapback is not a message.
+            try await requireRead(chatGuid)
             let page = try await session.call("messages.after", [
                 "since_rowid": .int(since),
                 "chat_id": .int(chatId),
@@ -156,11 +159,13 @@ actor Backfill {
 
             let next = page["next_rowid"]?.intValue ?? since
             let more = page["has_more"]?.boolValue ?? false
-            let events = await shape(page["messages"]?.arrayValue ?? [])
+            let events = await shape(page["messages"]?.arrayValue ?? [], for: chatGuid)
 
             do {
-                try await deliver(events)
+                try await deliver(events, for: chatGuid)
                 backoff = 0
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // The page stays unacknowledged and is asked for again. The
                 // collector dedupes by key, so a post that half landed costs
@@ -176,8 +181,11 @@ actor Backfill {
             sent += events.count
             let moved = BackfillMark.after(mark, sent: events.count,
                                            nextRowid: next, hasMore: more)
+            try await requireRead(chatGuid)
+            guard await core.mark(backfill: chatGuid, moved) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
             mark = moved
-            await core.mark(backfill: chatGuid, moved)
 
             if !more { break }
             if next <= since {
@@ -197,9 +205,14 @@ actor Backfill {
 
     // MARK: - rows
 
-    /// A page, decided by the same rules the stream uses and turned into the
-    /// same records. The allowlist is the one rule that does not apply.
-    private func shape(_ rows: [JSONValue]) async -> [Event] {
+    private func requireRead(_ guid: String) async throws {
+        guard !Task.isCancelled, await core.allowlist.mayRead(guid: guid) else {
+            throw CancellationError()
+        }
+    }
+
+    /// Only rows belonging to the requested chat can be part of this history.
+    private func shape(_ rows: [JSONValue], for guid: String) async -> [Event] {
         let directory = await core.directory
         var events: [Event] = []
         events.reserveCapacity(rows.count)
@@ -208,6 +221,7 @@ actor Backfill {
                 log.warn("a history row from the helper would not decode")
                 continue
             }
+            guard row.chatGuid == guid else { continue }
             switch Normalise.event(from: row, allowlist: nil, directory: directory) {
             case .event(let event): events.append(event)
             case .skipped(let why): log.debug("history row skipped: \(why.rawValue)")
@@ -217,7 +231,7 @@ actor Backfill {
     }
 
     /// One page's events, in posts of at most a hundred.
-    private func deliver(_ events: [Event]) async throws {
+    private func deliver(_ events: [Event], for guid: String) async throws {
         guard !events.isEmpty else { return }
         var rest = events[...]
         while !rest.isEmpty {
@@ -227,13 +241,9 @@ actor Backfill {
             // one yet. It is sent so the collector has something to echo and
             // is never advanced by anything on this path.
             let cursor = await core.cursor
-            let body = JSONValue.object([
-                "protocol": .int(1),
-                "backfill": .bool(true),
-                "events": try JSONValue.of(slice),
-                "cursor": cursor.map(JSONValue.int) ?? .null,
-            ])
-            _ = try await collector.post("/v1/messages/ingest", body)
+            try await requireRead(guid)
+            try await collector.ingest(slice, cursor: cursor, history: true)
+            try await requireRead(guid)
             await uploader?.forwarded(slice, live: false)
             try? await Task.sleep(nanoseconds: Self.betweenPosts)
         }

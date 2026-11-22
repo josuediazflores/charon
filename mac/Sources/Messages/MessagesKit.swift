@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import SwiftUI
 
 /* The Messages tab's own small parts: where it can be, what time it says, and
@@ -694,26 +693,6 @@ struct MsgHead<Acts: View>: View {
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
-    }
-}
-
-// MARK: - identity
-
-/// The message key rule of §3, on this side of the wire.
-///
-/// The fourth implementation of one sentence -- the Bridge hashes in Swift,
-/// `msglib` hashes in the pipeline, the collector hashes in Python -- and it is
-/// here for one reader: a send the Bridge reported carries the GUID of the row
-/// it became, and this is what turns that GUID into the key the transcript
-/// files that row under. Only ever used to *recognise* a row the store already
-/// holds, never to mint a name.
-enum MsgKey {
-    static func of(_ guid: String) -> String {
-        SHA256.hash(data: Data(guid.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-            .prefix(16)
-            .lowercased()
     }
 }
 

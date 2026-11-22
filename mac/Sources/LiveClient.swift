@@ -298,18 +298,12 @@ final class LiveClient: MailStore {
         return await post("v1/messages/save-draft", ["chat_key": chatKey, "body": body])
     }
 
-    /// File the text. Returns the outbox id, or nil if nothing was filed.
-    ///
-    /// **The second outward action in this system, and the same rule governs
-    /// it.** A human click reaches this function, the collector writes an
-    /// outbox record, and the Bridge on this Mac performs it once through
-    /// Messages.app. No model is anywhere in that path. The request carries a
-    /// chat key and a body and nothing else: the handle is resolved on the Pi
-    /// from the chat's own guid, so nothing typed here can redirect a text.
-    func send(chatKey: String, body: String) async -> String? {
-        guard MessageRoute.isValidKey(chatKey) else { return nil }
-        guard body.count <= MessageRoute.maxSendBody else { return nil }
-        return await mint("v1/messages/send", ["chat_key": chatKey, "body": body])
+    func send(_ intent: MessageSendRequest) async -> MessageSubmission {
+        guard MessageRoute.isValidKey(intent.chatKey), !intent.body.isEmpty,
+              intent.body.count <= MessageRoute.maxSendBody else { return .refused }
+        return await intent.submit { body in
+            try await self.session.data(for: self.request("v1/messages/send", method: "POST", json: body))
+        }
     }
 
     func summary(date: String) async throws -> MessageSummaryDoc? {

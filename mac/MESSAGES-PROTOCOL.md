@@ -34,7 +34,7 @@ when it wakes; nothing is lost, it arrives late.
 - **message key** `key` = `sha256(guid)[:16]`, 16 hex. `guid` is the Messages row GUID.
 - **chat key** `chat_key` = `sha256(chat_guid)[:16]`, 16 hex. `chat_guid` is the
   Messages chat GUID, e.g. `iMessage;-;+14085550142`, or `iMessage;+;chat…` for a group.
-- **outbox id** `id`, 16 hex, minted by the collector.
+- **outbox id** `id`, 16 hex, returned by the collector. Each new confirmed action also has a client-generated lowercase UUID in `request_id`.
 - Dates are ISO 8601 UTC with `Z`. Clients validate key shapes before building a
   URL (unknown paths return the console HTML with 200).
 
@@ -108,7 +108,7 @@ null, so a collector that predates them sees the heartbeat it already knows.
 **Outbox item** (collector-owned)
 ```json
 { "id": "…16hex", "chat_key": "…", "chat_guid": "…", "body": "Yes, 6 works. …",
-  "status": "queued|sent|failed", "at": "…", "sent_at": null,
+  "status": "queued|sent|failed", "request_id": "…uuid", "at": "…", "sent_at": null,
   "guid": null, "message_id": null, "error": null, "disposition": null, "retry_safe": null }
 ```
 
@@ -117,7 +117,7 @@ null, so a collector that predates them sees the heartbeat it already knows.
 ### Bridge → collector
 | method · path | body | reply |
 |---|---|---|
-| `POST /v1/messages/ingest` | `{protocol, events: [Event…] ≤100, cursor, backfill?}` | `{ok, stored, duplicates, cursor_ack}` |
+| `POST /v1/messages/ingest` | `{protocol, events: [Event…] ≤100, cursor, backfill?}` | `{ok, stored, duplicates, rejected?, cursor_ack}` |
 | `POST /v1/messages/bridge` | Heartbeat | `{ok}` |
 | `POST /v1/messages/chats` | `{protocol, chats: [Chat…]}` | `{ok, count}` |
 | `GET  /v1/messages/config` | | Config |
@@ -132,11 +132,11 @@ null, so a collector that predates them sees the heartbeat it already knows.
 | `GET  /v1/telemetry` | | envelope `sources.messages` (§6) |
 | `GET  /v1/messages/chats` | | `{chats: [Chat + config fields…]}` |
 | `POST /v1/messages/config` | Config | `{ok}` |
-| `GET  /v1/messages/thread/<chat_key>?limit=50&before=<key>` | | `{chat, messages: [Event + ai…] oldest→newest, draft, user_draft, outbox, read_to}`; `outbox` is this chat's own sends from the last 24 h (`{id, status, body, at, sent_at, guid, message_id, error, disposition}`, ≤ 20, newest last) |
+| `GET  /v1/messages/thread/<chat_key>?limit=50&before=<key>` | | `{chat, messages: [Event + ai…] oldest→newest, draft, user_draft, outbox, read_to}`; `outbox` is this chat's own sends from the last 24 h (`{id, status, body, at, sent_at, guid, message_id, error, disposition, retry_safe, request_id}`, ≤ 20, newest last) |
 | `POST /v1/messages/read` | `{chat_key}` | `{ok}` |
 | `POST /v1/messages/draft` | `{chat_key, instructions?}` | `{ok, status}` |
 | `POST /v1/messages/save-draft` | `{chat_key, body}` | `{ok}` |
-| `POST /v1/messages/send` | `{chat_key, body ≤4000}` | `{ok, id}` · 404 unknown chat · 403 policy is `off` |
+| `POST /v1/messages/send` | `{chat_key, body ≤4000, request_id?}` | `{ok, id, request_id?}` · 404 unknown chat · 403 policy is `off` |
 | `GET  /v1/messages/summary/<YYYY-MM-DD>` | | summary document |
 | `POST /v1/messages/summary/read` · `/archive` | `{date}` | `{ok}` |
 | `GET  /v1/messages/attachment/<key>/<n>` | | the bytes · 404 when they are not stored |
@@ -197,11 +197,12 @@ yet → `dormant`.
 
 ## 7. Semantics that matter
 
-**Upstream is at-least-once, deduped by key.** The Bridge keeps an in-memory
-cursor while it streams and persists only the `cursor_ack` the collector
-returns. A crash re-sends what was not acked; the collector ignores keys it
-already holds. On first run the Bridge has no cursor and starts at "now":
-enabling the channel never replays history.
+**Imports can be replayed by message key.** A successful receipt accounts for
+every submitted event in `stored + duplicates + rejected`. A permanent rejection
+counts as processed. A temporary storage failure returns HTTP 503. The Bridge
+retains the batch on a failed or incomplete receipt, including partial 200
+responses from older collectors. It checkpoints the live cursor only after
+the collector acknowledges the submitted cursor. History uses its own page mark.
 
 **Allowing one chat backfills that chat.** When a conversation becomes
 allowlisted (`read: true`), the Bridge reads its entire history once, in pages,
@@ -217,15 +218,24 @@ chat is read at a time and the pages share the helper with the live watch, so
 turning on a nine-year thread slows the backfill, not the stream. A chat is
 backfilled once; switching it off and on again does not do it a second time.
 
-**The allowlist is enforced twice.** The Bridge drops rows from chats that are
-not `read: true` before they leave the Mac (it counts them, it does not log
-them). The collector refuses sends to chats whose policy is `off` or unknown.
-The Bridge re-checks the same before performing a send.
+**Read permission applies during import.** The Bridge checks the current chat
+policy before sending buffered events and history pages. The collector checks
+permission again when processing them. The Bridge requires read access and the
+`confirm` policy before calling the sender.
 
-**A send is one attempt, reported honestly.** The app files it; the collector
-queues it; the Bridge performs it once and reports `sent` or `failed` with the
-disposition it got. Nothing retries on its own. A failed item stays visible in
-the thread for the user to resend by hand.
+**One confirmed action queues one send.** Reusing a `request_id` with the same
+chat and body returns the existing outbox ID. A different chat or body with
+that request ID receives HTTP 409. Older callers may omit it. The app displays
+`queued` on acceptance and `sent` when the Bridge reports helper success.
+The user can retry a known failure only when `disposition` is `not_started`
+and `retry_safe` is true. Uncertain and legacy outcomes without this evidence
+have no retry action.
+
+The Bridge journals the attempt before invoking the helper and retains the
+outcome until the collector acknowledges it. Restarting replays the report.
+An interrupted attempt with no recorded result is reported as
+`may_have_completed`. Identical terminal reports are idempotent. Conflicting
+terminal reports receive HTTP 409 and preserve the original outcome.
 
 **Photos come on their own; everything else is asked for.** Right after the
 ingest ack, the Bridge uploads every attachment of a **live** event whose mime

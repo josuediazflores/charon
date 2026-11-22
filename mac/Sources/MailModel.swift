@@ -19,15 +19,6 @@ import SwiftUI
  * a second source of truth.
  */
 
-/// One text this copy filed: the outbox id the collector minted, the chat it
-/// belongs to, and when the click happened. The clock is what keeps a payload
-/// assembled a moment BEFORE the send from retiring it.
-struct MessagesSend: Equatable, Identifiable {
-    var id: String
-    var chatKey: String
-    var at: Date
-}
-
 @MainActor
 @Observable
 final class MailModel {
@@ -86,15 +77,8 @@ final class MailModel {
     /// confirms nothing.
     private(set) var readHereChats: Set<String> = []
 
-    /// The texts this copy has filed, newest last.
-    ///
-    /// **Not the mailbox's pending set, and it cannot be.** The telemetry
-    /// envelope carries no outbox for messages -- only `counts.queued` -- so
-    /// there is no per-record confirmation to reconcile against. What clears an
-    /// entry is the collector saying nothing is queued at all, in a payload
-    /// fetched after the entry was filed; anything else would drop the QUEUED
-    /// line off a send still sitting in front of the Bridge.
-    private(set) var sentHere: [MessagesSend] = []
+    private(set) var messageDelivery = MessageDeliveryLedger()
+    private var messageTimers: [String: Task<Void, Never>] = [:]
 
     // MARK: - wiring
 
@@ -171,11 +155,6 @@ final class MailModel {
         readHereChats.contains(chat.chatKey) ? 0 : chat.unread
     }
 
-    /// Every send this copy filed for one chat, oldest first.
-    func sends(for chatKey: String) -> [MessagesSend] {
-        sentHere.filter { $0.chatKey == chatKey }
-    }
-
     @discardableResult
     func markChatRead(_ chatKey: String) async -> Bool {
         if !readHereChats.contains(chatKey) { readHereChats.insert(chatKey) }
@@ -185,11 +164,29 @@ final class MailModel {
         return ok
     }
 
-    /// File a text. The id the collector minted, or nil when nothing was filed.
-    func sendMessage(chatKey: String, body: String) async -> String? {
-        guard let id = await store.send(chatKey: chatKey, body: body) else { return nil }
-        sentHere.append(MessagesSend(id: id, chatKey: chatKey, at: Date()))
-        return id
+    /// The undo window belongs to the model so switching chats cannot stop an authorized send.
+    func holdMessage(_ request: MessageSendRequest) {
+        guard messageDelivery.hold(request) else { return }
+        let target = store
+        messageTimers[request.id] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            guard let self, messageDelivery.begin(request) else { return }
+            let outcome = await target.send(request)
+            guard !Task.isCancelled else { return }
+            messageDelivery.complete(request, with: outcome)
+            messageTimers[request.id] = nil
+        }
+    }
+
+    func undoMessage(_ id: String) -> Bool {
+        guard messageDelivery.undo(id) else { return false }
+        messageTimers.removeValue(forKey: id)?.cancel()
+        return true
+    }
+
+    func reconcileDelivery(chatKey: String, thread: MessageThread) {
+        let outboundKeys = Set(thread.messages.filter(\.isFromMe).map(\.key))
+        messageDelivery.reconcile(chatKey: chatKey, outbox: thread.outbox, outboundKeys: outboundKeys)
     }
 
     func refresh() async {
@@ -262,7 +259,9 @@ final class MailModel {
         freshHere = []
         goneHere = []
         readHereChats = []
-        sentHere = []
+        for timer in messageTimers.values { timer.cancel() }
+        messageTimers.removeAll()
+        messageDelivery = MessageDeliveryLedger()
         Task { await refresh() }
     }
 
@@ -296,18 +295,13 @@ final class MailModel {
     /// The same contract for the chats, and the one place it differs said out
     /// loud: a read mark is confirmed when the payload lists the chat AND says
     /// it has nothing unread, and a chat the payload does not list confirms
-    /// nothing. The sends have no per-record confirmation to wait for, so what
-    /// retires them is an empty queue reported after they were filed.
+    /// nothing.
     private func reconcileMessages() {
         if let chats = payload?.messages?.data?.chats {
             let byKey = Dictionary(chats.map { ($0.chatKey, $0) },
                                    uniquingKeysWith: { a, _ in a })
             readHereChats = readHereChats.filter { byKey[$0]?.unread != 0 }
         }
-
-        guard payload?.messages?.data?.counts.queued == 0,
-              let fetched = Fmt.date(payload?.messages?.fetchedAt) else { return }
-        sentHere = sentHere.filter { $0.at > fetched }
     }
 
     func isRead(_ key: String) -> Bool { readHere.contains(key) }

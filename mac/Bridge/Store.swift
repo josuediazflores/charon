@@ -13,6 +13,8 @@ import Foundation
 /// acknowledged -- section 7.
 struct BridgeState: Codable, Sendable, Equatable {
     var cursor: Int?
+    /// Resume here if the first live batch has yet to be acknowledged.
+    var firstLiveResume: Int?
     /// Which Messages database that cursor belongs to. A rowid from another
     /// database is not a smaller number, it is a different question.
     var dbIdentity: String?
@@ -32,18 +34,12 @@ struct BridgeState: Codable, Sendable, Equatable {
     /// the file has always held.
     enum CodingKeys: String, CodingKey {
         case cursor
+        case firstLiveResume = "first_live_resume"
         case dbIdentity = "db_identity"
         case lastEventAt = "last_event_at"
         case updatedAt = "updated_at"
         case backfill
     }
-}
-
-struct OutboxSeen: Codable, Sendable, Equatable {
-    var ids: [String] = []
-    /// Enough to cover any backlog the collector could hand us; the point is
-    /// the recent past, not a permanent record.
-    static let keep = 500
 }
 
 /// `attachments-seen.json`: where the file behind each forwarded attachment

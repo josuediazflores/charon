@@ -252,8 +252,8 @@ final class DemoStore: MailStore {
         msgs.saveDraft(chatKey, body: body)
     }
 
-    func send(chatKey: String, body: String) async -> String? {
-        msgs.send(chatKey, body: body)
+    func send(_ intent: MessageSendRequest) async -> MessageSubmission {
+        msgs.send(intent)
     }
 
     func summary(date: String) async throws -> MessageSummaryDoc? {

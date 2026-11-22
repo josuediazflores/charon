@@ -25,6 +25,8 @@ actor Core {
     private(set) var dbOk = false
     private(set) var helperState: HelperState = .missing
     private(set) var cursor: Int?
+    private var firstLiveResume: Int?
+    var resumeCursor: Int? { cursor ?? firstLiveResume }
     private(set) var dbIdentity: String?
     private(set) var lastEventAt: String?
     private(set) var dropped = 0
@@ -56,6 +58,7 @@ actor Core {
 
         if let state = Store.read(BridgeState.self, from: paths.stateFile) {
             cursor = state.cursor
+            firstLiveResume = state.firstLiveResume
             dbIdentity = state.dbIdentity
             lastEventAt = state.lastEventAt
             backfill = state.backfill ?? [:]
@@ -173,6 +176,7 @@ actor Core {
         if dbIdentity != nil {
             log.warn("the Messages database changed — the cursor is being discarded")
             cursor = nil
+            firstLiveResume = nil
             lastEventAt = nil
             // And the backfill's marks with it. Those are rowids too, and a
             // resume point from the old file would skip the start of the new
@@ -184,14 +188,29 @@ actor Core {
         persist()
     }
 
+    /// A first subscription starts at now. Remember its starting point before
+    /// the first network post, so a restart can replay that first batch too.
+    func rememberFirstRow(_ rowid: Int) {
+        guard resumeCursor == nil, rowid > 0 else { return }
+        firstLiveResume = rowid - 1
+        if !persist() { log.warn("could not checkpoint the start of the live stream") }
+    }
+
     /// A rowid the collector has acknowledged, and the time of the newest
     /// event in that batch.
-    func acked(cursor rowid: Int, lastEventAt stamp: String?) {
-        if let current = cursor, rowid <= current, stamp == nil { return }
+    @discardableResult
+    func acked(cursor rowid: Int, lastEventAt stamp: String?) -> Bool {
+        if let current = cursor, rowid <= current, stamp == nil { return true }
+        let previous = (cursor, lastEventAt, firstLiveResume)
+        firstLiveResume = nil
         cursor = max(rowid, cursor ?? rowid)
         if let stamp { lastEventAt = stamp }
+        guard persist() else {
+            (cursor, lastEventAt, firstLiveResume) = previous
+            return false
+        }
         dirty = true
-        persist()
+        return true
     }
 
     /// Where one chat's history got to, after a page landed.
@@ -200,14 +219,21 @@ actor Core {
     /// backfill can be thousands of rows long, and the whole point of the mark
     /// is that a Bridge which stops in the middle of one resumes instead of
     /// starting again.
-    func mark(backfill chatGuid: String, _ mark: BackfillMark) {
-        backfill[chatGuid] = mark
+    @discardableResult
+    func mark(backfill chatGuid: String, _ mark: BackfillMark) -> Bool {
+        let prior = backfill.updateValue(mark, forKey: chatGuid)
+        guard persist() else {
+            backfill[chatGuid] = prior
+            return false
+        }
         dirty = true
-        persist()
+        return true
     }
 
-    private func persist() {
+    @discardableResult
+    private func persist() -> Bool {
         Store.write(BridgeState(cursor: cursor,
+                                firstLiveResume: firstLiveResume,
                                 dbIdentity: dbIdentity,
                                 lastEventAt: lastEventAt,
                                 updatedAt: Stamp.now(),

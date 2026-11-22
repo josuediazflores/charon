@@ -183,7 +183,9 @@ directories above. Revoking Full Disk Access is worth doing at the same time.
 **It never retries a send.** The app files a reply, the collector queues it,
 the Bridge performs it once and reports what happened. An outcome the helper
 cannot vouch for is reported as exactly that, `may_have_completed`, and left
-alone. A failed item stays in the thread for you to send by hand.
+alone. The Bridge keeps its result on disk and retries the report after an
+outage or restart. The thread offers a manual retry only when the helper
+confirmed that sending never started and retrying is safe.
 
 **It enforces the allowlist before anything leaves this Mac.** A row from a
 chat that is not marked read is dropped here, counted, and never named in the

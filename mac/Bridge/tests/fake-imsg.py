@@ -271,6 +271,10 @@ def main():
             else:
                 reply(rid, page)
         elif method == "send":
+            marker = os.environ.get("CHARON_FAKE_SEND_MARKER")
+            if marker:
+                with open(marker, "a") as attempts:
+                    attempts.write("send\n")
             if "chat_guid" not in params or "text" not in params:
                 fail(rid, -32602, "Invalid params")
             else:

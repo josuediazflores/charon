@@ -50,14 +50,6 @@ private let msgSaveAfter: Duration = .milliseconds(1500)
 /// How often the open thread is re-read.
 private let msgPoll: Duration = .seconds(10)
 
-/// The window between Enter and the request. The whole of what replaced the
-/// confirm step, and the only part of sending that is still yours.
-private let msgUndoWindow: Duration = .seconds(5)
-
-/// How long `sent` stands before the line goes quiet. Long enough to be read,
-/// short enough not to become furniture.
-private let msgSentHolds: Duration = .seconds(3)
-
 /// How often the thread is re-read while charon is writing, and how long that
 /// is allowed to go on for.
 ///
@@ -70,10 +62,6 @@ private let msgDraftWait: TimeInterval = 60
 
 /// How far apart two runs have to be before the gap is worth naming.
 private let msgSeparatorGap: TimeInterval = 15 * 60
-
-/// How far a real row may sit from an optimistic one and still be it, when
-/// there is no guid to match on.
-private let msgEchoWindow: TimeInterval = 120
 
 struct MessagesThreadView: View {
 
@@ -108,11 +96,7 @@ struct MessagesThreadView: View {
     @State private var draftTask: Task<Void, Never>?
 
     // ── the sends that have not landed ──
-    @State private var pending: [PendingSend] = []
-    /// Each held send's own clock, beside the list rather than in it: a value
-    /// copied out of an array is not the thing three call sites would be
-    /// cancelling.
-    @State private var timers: [UUID: Task<Void, Never>] = [:]
+    private var pending: [MessageDeliveryRow] { model.messageDelivery.rows(for: chatKey) }
 
     // ── the log ──
     /// One photograph, held open over the pane. Here rather than in the tile
@@ -156,7 +140,6 @@ struct MessagesThreadView: View {
         .onDisappear {
             saveTask?.cancel()
             draftTask?.cancel()
-            for task in timers.values { task.cancel() }
             model.textFocused = false
         }
     }
@@ -409,17 +392,22 @@ struct MessagesThreadView: View {
     /// No transition on this one. Enter is a keystroke, and the whole point of
     /// drawing the bubble at once is that it is already there.
     @ViewBuilder
-    private func optimistic(_ item: PendingSend, width: CGFloat) -> some View {
+    private func optimistic(_ item: MessageDeliveryRow, width: CGFloat) -> some View {
         // The first of them opens a turn if the transcript's last run was
         // theirs; the rest are one group with each other.
         let first = pending.first?.id == item.id
         let after = runs.last.map { !$0.isFromMe } ?? false
+        let action: String? = switch item.stage {
+        case .holding: "undo"
+        case .retryable where sendable && item.retryRequest != nil: "try again"
+        default: nil
+        }
 
         MsgRun(text: item.text,
                outbound: true,
-               tone: item.stage == .failed ? .failed : .sent,
+               tone: [.refused, .retryable, .unknown].contains(item.stage) ? .failed : .sent,
                slack: slack(width, outbound: true),
-               status: item.status,
+               status: MsgStatus(word: item.stage.label, act: action),
                onStatusAct: { act(on: item) })
             .padding(.top, first && after ? 8 : 0)
     }
@@ -616,64 +604,17 @@ struct MessagesThreadView: View {
         saveTask?.cancel()
         answerDraft()
 
-        let item = PendingSend(text: text, knownKeys: Set(runs.map(\.key)))
-        pending.append(item)
-        arm(item.id)
+        model.holdMessage(MessageSendRequest(chatKey: chatKey, body: text))
     }
 
     /// Whether this chat may be written to at all. `off` and unknown are the
     /// same refusal, here as on the Pi.
     private var sendable: Bool { chat?.policy == .confirm }
 
-    /// Start, or restart, one send's five seconds.
-    private func arm(_ id: UUID) {
-        guard let at = pending.firstIndex(where: { $0.id == id }) else { return }
-        timers[id]?.cancel()
-        pending[at].stage = .holding
-        timers[id] = Task {
-            try? await Task.sleep(for: msgUndoWindow)
-            if Task.isCancelled { return }
-            await file(id)
-        }
-    }
-
-    /// The five seconds are up. This is where a text leaves the Mac.
-    private func file(_ id: UUID) async {
-        guard let at = pending.firstIndex(where: { $0.id == id }) else { return }
-        let text = pending[at].text
-        pending[at].stage = .filing
-        let outboxId = await model.sendMessage(chatKey: chatKey, body: text)
-        guard let now = pending.firstIndex(where: { $0.id == id }) else { return }
-        guard let outboxId else {
-            // 403, 404 or no collector. Nothing was filed and nothing will be
-            // sent, and the row says exactly that.
-            pending[now].stage = .failed
-            return
-        }
-        pending[now].outboxId = outboxId
-        pending[now].stage = .sent
-        timers[id] = Task {
-            try? await Task.sleep(for: msgSentHolds)
-            if Task.isCancelled { return }
-            guard let then = pending.firstIndex(where: { $0.id == id }),
-                  pending[then].stage == .sent else { return }
-            pending[then].stage = .quiet
-        }
-        // Read the thread now rather than on the next poll: the record the
-        // Bridge has to pick up exists, and the thread's own copy of the outbox
-        // is how this page learns what happened to it.
-        tick += 1
-    }
-
-    /// The one word on the status line you can press: `undo` while the clock is
-    /// running, `try again` after a refusal.
-    private func act(on item: PendingSend) {
-        guard let at = pending.firstIndex(where: { $0.id == item.id }) else { return }
-        switch pending[at].stage {
-        case .holding:
-            drop(item.id)
-            // The words go back where they were, caret at the end, and nothing
-            // animates: undo is a correction, not a transition.
+    private func act(on item: MessageDeliveryRow) {
+        if let retry = item.retryRequest, sendable {
+            model.holdMessage(retry)
+        } else if model.undoMessage(item.id) {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
@@ -682,28 +623,16 @@ struct MessagesThreadView: View {
             }
             saveTask?.cancel()
             typing = true
-        case .failed:
-            pending[at].outboxId = nil
-            arm(item.id)
-        case .filing, .sent, .quiet:
-            return
         }
-    }
-
-    /// One held send, forgotten: its clock stopped and its row gone.
-    private func drop(_ id: UUID) {
-        timers[id]?.cancel()
-        timers[id] = nil
-        pending.removeAll { $0.id == id }
     }
 
     // MARK: - acts
 
     private func load() async {
+        let source = model.store
         do {
-            let got = try await model.store.thread(chatKey: chatKey,
-                                                   limit: MessageRoute.threadLimit,
-                                                   before: nil)
+            let got = try await source.thread(chatKey: chatKey, limit: MessageRoute.threadLimit, before: nil)
+            guard !Task.isCancelled, source === model.store else { return }
             guard let got else {
                 missing = true
                 return
@@ -745,7 +674,7 @@ struct MessagesThreadView: View {
         }
         openOnce(got)
         absorbDraft()
-        reconcile(got)
+        model.reconcileDelivery(chatKey: chatKey, thread: got)
     }
 
     /// His own unsent words, once, on the way in. charon's draft is NOT put in
@@ -761,61 +690,6 @@ struct MessagesThreadView: View {
         filled = mine
     }
 
-    /// What the store now says about the sends this page is holding.
-    ///
-    /// Three answers, in order of how much they know: the outbox says this send
-    /// failed, so the row says so; the outbox says it was sent and names the
-    /// row it became, and that row is in the transcript, so the optimistic
-    /// bubble has been replaced by the real one; or there is no outbox at all
-    /// -- an older collector -- and an outbound row this page has not seen
-    /// before, carrying these words, within two minutes, is it.
-    private func reconcile(_ got: MessageThread) {
-        let byId = Dictionary(got.outbox.map { ($0.id, $0) },
-                              uniquingKeysWith: { a, _ in a })
-        let keys = Set(got.messages.map(\.key))
-        var landed: [UUID] = []
-
-        for item in pending {
-            guard item.stage != .holding else { continue }
-            if let id = item.outboxId, let record = byId[id] {
-                if record.status == "failed" {
-                    mark(item.id, .failed)
-                    continue
-                }
-                if record.status == "sent", let guid = record.guid,
-                   keys.contains(MsgKey.of(guid)) {
-                    landed.append(item.id)
-                    continue
-                }
-            }
-            if echo(of: item, in: got.messages) { landed.append(item.id) }
-        }
-
-        for id in landed { drop(id) }
-    }
-
-    /// The fallback match, and it is deliberately narrow: only a row this page
-    /// had never seen when the send was made, only outbound, only these exact
-    /// words, and only within two minutes of the send. Without the first of
-    /// those, sending `ok` to somebody you have already said `ok` to would drop
-    /// the new bubble against the old row.
-    private func echo(of item: PendingSend, in messages: [MessageRecord]) -> Bool {
-        messages.contains { record in
-            guard record.isFromMe, !item.knownKeys.contains(record.key) else { return false }
-            guard (record.text ?? "") == item.text else { return false }
-            guard let at = Fmt.date(record.createdAt) else { return true }
-            return abs(at.timeIntervalSince(item.at)) < msgEchoWindow
-        }
-    }
-
-    private func mark(_ id: UUID, _ stage: PendingSend.Stage) {
-        guard let at = pending.firstIndex(where: { $0.id == id }),
-              pending[at].stage != stage else { return }
-        timers[id]?.cancel()
-        timers[id] = nil
-        pending[at].stage = stage
-    }
-
     private func scheduleSave(_ text: String) {
         saveTask?.cancel()
         guard thread != nil, text != (filled ?? "") else { return }
@@ -823,54 +697,6 @@ struct MessagesThreadView: View {
             try? await Task.sleep(for: msgSaveAfter)
             if Task.isCancelled { return }
             _ = await model.store.saveDraft(chatKey: chatKey, body: text)
-        }
-    }
-}
-
-// MARK: - a send that has not landed
-
-/// One text between Enter and the transcript.
-///
-/// A value, and its clock is not in it: the timer lives beside the list in the
-/// view, because a struct copied out of an array is not the thing undo would be
-/// cancelling.
-struct PendingSend: Identifiable, Equatable {
-    enum Stage {
-        /// The five seconds. Nothing has left the Mac.
-        case holding
-        /// The request is in flight.
-        case filing
-        /// Filed. The Bridge has it, or is about to.
-        case sent
-        /// Filed a while ago. The bubble stays; the line under it does not.
-        case quiet
-        /// Nothing was filed, or the Bridge could not perform it.
-        case failed
-    }
-
-    let id = UUID()
-    let text: String
-    /// When the words were written, for the echo match.
-    let at = Date()
-    /// Every key the transcript already held when this was written, so a row
-    /// that was already there can never be mistaken for this one coming back.
-    let knownKeys: Set<String>
-    var stage: Stage = .holding
-    var outboxId: String?
-
-    init(text: String, knownKeys: Set<String>) {
-        self.text = text
-        self.knownKeys = knownKeys
-    }
-
-    /// What the line beside the bubble says, or nothing at all.
-    var status: MsgStatus? {
-        switch stage {
-        case .holding: return MsgStatus(word: "sending", act: "undo")
-        case .filing: return MsgStatus(word: "sending", act: nil)
-        case .sent: return MsgStatus(word: "sent", act: nil)
-        case .quiet: return nil
-        case .failed: return MsgStatus(word: "not delivered", act: "try again")
         }
     }
 }

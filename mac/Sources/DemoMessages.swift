@@ -221,22 +221,28 @@ final class DemoMessagesStore {
     /// text lands in the transcript as an outbound run when it goes, which is
     /// what the real one does too: the Bridge sends it, `chat.db` gains a row,
     /// and the row comes back up as an event.
-    func send(_ chatKey: String, body: String) -> String? {
-        guard body.count <= MessageRoute.maxSendBody else { return nil }
-        guard threads[chatKey] != nil else { return nil }
+    func send(_ intent: MessageSendRequest) -> MessageSubmission {
+        let chatKey = intent.chatKey
+        let body = intent.body
+        if let existing = threads[chatKey]?.outbox.first(where: { $0.requestID == intent.requestID }) {
+            return existing.body == body ? .accepted(existing.id) : .unknown
+        }
+        guard body.count <= MessageRoute.maxSendBody else { return .refused }
+        guard threads[chatKey] != nil else { return .refused }
         // The collector refuses a chat whose policy is `off` (§7), and so does
         // the fixture: a demo that queued a send the real one would reject is a
         // demo of a bug.
         guard chats.first(where: { $0.chatKey == chatKey })?.policy == .confirm else {
-            return nil
+            return .refused
         }
 
         let id = DemoMessagesStore.mintHex()
         // Queued, and visible on the thread route the same second -- which is
         // the whole point of the field: the app has an outbox item to watch
         // before it has a message row to draw.
-        threads[chatKey]?.outbox.append(
-            MessageOutboxItem(id: id, status: "queued", body: body, at: Fmt.stampNow()))
+        var item = MessageOutboxItem(id: id, status: "queued", body: body, at: Fmt.stampNow())
+        item.requestID = intent.requestID
+        threads[chatKey]?.outbox.append(item)
 
         Task { [weak self] in
             try? await Task.sleep(for: DemoMessagesStore.sendDelay)
@@ -259,7 +265,7 @@ final class DemoMessagesStore {
             self.threads[chatKey] = current
         }
 
-        return id
+        return .accepted(id)
     }
 
     func summaryRead(_ date: String) -> Bool {

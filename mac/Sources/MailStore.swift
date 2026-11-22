@@ -112,10 +112,8 @@ protocol MessagesStore: AnyObject {
     func markRead(chatKey: String) async -> Bool
     func requestDraft(chatKey: String, instructions: String?) async -> Bool
     func saveDraft(chatKey: String, body: String) async -> Bool
-    /// The outbox id, or nil when nothing was filed -- 404 on an unknown chat
-    /// and 403 on a chat whose policy is `off` both land here, and both mean
-    /// nothing will be sent.
-    func send(chatKey: String, body: String) async -> String?
+    /// A lost acknowledgement may still have queued the request.
+    func send(_ request: MessageSendRequest) async -> MessageSubmission
 
     /// One day's document. Nil on 404, which is most dates.
     func summary(date: String) async throws -> MessageSummaryDoc?

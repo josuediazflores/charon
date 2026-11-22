@@ -1928,6 +1928,7 @@ MESSAGES_THREAD_INDEX_NAME = ".threads"
 # between the two channels is what gets hashed, and that lives on the Mac and in
 # msglib, not here.
 _MESSAGES_KEY = _MAIL_KEY
+_MESSAGES_REQUEST_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 _MESSAGES_KEY_NAME = _MAIL_KEY_NAME
 # The same shape with the key index's extension, for the one directory in this
 # store whose entries are not `.json`.
@@ -7350,9 +7351,38 @@ class Collector:
             return "off", False
         policy = entry.get("send")
         return (policy if policy in MESSAGES_POLICIES else "off",
-                bool(entry.get("read")))
+                entry.get("read") is True)
 
     # -- what the Bridge pushes ----------------------------------------------
+
+    def messages_import_allowlist(self):
+        """Read consent for new imports. Called with the config writer's lock held."""
+        path = self.messages_path("config.json")
+        if not path:
+            return None
+        try:
+            with open(path) as fh:
+                config = json.load(fh)
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            return None
+        chats = config.get("chats") if isinstance(config, dict) else None
+        return chats if isinstance(chats, dict) else None
+
+    def messages_ensure_triage(self, key, record):
+        """A live inbound record needs either a durable queue entry or a verdict."""
+        if record.get("backfill") or record["is_from_me"]:
+            return True
+        spool = self.messages_path(MESSAGES_QUEUE_NAME, f"triage-{key}")
+        if not spool:
+            return False
+        if os.path.isfile(spool):
+            return True
+        verdict = self.messages_json("ai", f"{key}.json")
+        if verdict and verdict.get("status") in ("ok", "failed"):
+            return True
+        return write_atomic(spool, key)
 
     def messages_ingest(self, doc):
         """Store one batch of message rows. (reply, None, None) or
@@ -7377,9 +7407,9 @@ class Collector:
         himself is a model reading his outbox back to him.
 
         `cursor_ack` is what the Bridge persists, so it is deliberately
-        conservative. It stops at the first row that failed to *land* -- a disk
-        error, a path that would leave the store -- because that row has to be
-        sent again. It does not stop at a row that was *refused*: a malformed
+        conservative. A temporary failure persists the landed prefix locally and
+        returns HTTP 503 so both old and new bridges replay the entire batch.
+        A successful receipt can skip a permanently refused row: a malformed
         event will be refused identically forever, and blocking the cursor on
         one would wedge the stream on a row that can never be accepted.
 
@@ -7409,22 +7439,29 @@ class Collector:
         # Skipped for the rest of it and removed at the end, below.
         broken = set()
         acked = None
-        landing = True   # nothing has failed to land yet
+        failure = None
         first_error = None
 
         with self._messages_lock:
             if not self.messages_ensure_dirs():
-                return None, "cannot create the messages store", 500
+                return None, "cannot create the messages store", 503
+            allowlist = self.messages_import_allowlist() if events else {}
+            if allowlist is None:
+                return None, "cannot read the Messages allowlist", 503
 
             for row in events:
                 record, why = clean_message_event(row)
+                if not why:
+                    entry = allowlist.get(record["chat_guid"])
+                    if not isinstance(entry, dict) or entry.get("read") is not True:
+                        why = "reading is not enabled for this conversation"
                 if why:
                     # Refused, permanently. Counted and named in the reply so a
                     # Bridge being written against this learns what it got
                     # wrong, and skipped over rather than blocking the cursor.
                     rejected += 1
                     first_error = first_error or why
-                    if landing and isinstance(row, dict) \
+                    if isinstance(row, dict) \
                             and isinstance(row.get("rowid"), int):
                         acked = max(acked or 0, row["rowid"])
                     continue
@@ -7434,14 +7471,17 @@ class Collector:
                 index = self.messages_path("index", f"{key}.json")
                 body = self.messages_path("bodies", f"{key}.txt")
                 if not index or not body:
-                    landing = False
-                    first_error = first_error or "the store rejected a path"
-                    continue
+                    failure = "the store rejected a path"
+                    break
 
                 if os.path.exists(index):
+                    if not backfill:
+                        previous = self.messages_record(key)
+                        if previous is None or not self.messages_ensure_triage(key, previous):
+                            failure = "cannot verify the queued message"
+                            break
                     duplicates += 1
-                    if landing:
-                        acked = max(acked or 0, rowid)
+                    acked = max(acked or 0, rowid)
                     continue
 
                 text = record.pop("text")
@@ -7461,13 +7501,11 @@ class Collector:
                 record["body_chars"] = len(text)
 
                 if not write_atomic(body, text):
-                    landing = False
-                    first_error = first_error or "cannot write a message body"
-                    continue
+                    failure = "cannot write a message body"
+                    break
                 if not write_atomic(index, json.dumps(record, indent=2)):
-                    landing = False
-                    first_error = first_error or "cannot write an index record"
-                    continue
+                    failure = "cannot write an index record"
+                    break
                 stored += 1
 
                 # The conversation's summary, which is what the chat list is
@@ -7497,22 +7535,10 @@ class Collector:
                             chat, key, record):
                     broken.add(chat)
 
-                # Inbound and present. History raises nothing here at all: the
-                # queue is what wakes the triage worker, and nobody wants a
-                # verdict on a conversation they had in March.
-                if not backfill and not record["is_from_me"]:
-                    spool = self.messages_path(MESSAGES_QUEUE_NAME,
-                                               f"triage-{key}")
-                    if spool:
-                        # Atomic even though it is one short line: a path unit
-                        # fires on the directory becoming non-empty, so the
-                        # worker can be reading this file within milliseconds of
-                        # it appearing, and an entry it caught empty would be a
-                        # verdict with no subject.
-                        write_atomic(spool, key)
-
-                if landing:
-                    acked = max(acked or 0, rowid)
+                if not self.messages_ensure_triage(key, record):
+                    failure = "cannot queue the message for triage"
+                    break
+                acked = max(acked or 0, rowid)
 
             # After every row of the batch, so a hundred events of one
             # conversation cost one write. A summary that will not write is
@@ -7543,9 +7569,8 @@ class Collector:
 
             fields = {
                 "last_ingest_at": stamp(),
-                "last_ingest_ok": landing,
-                "last_error": None if landing
-                else str(first_error)[:MESSAGES_ERROR_CHARS],
+                "last_ingest_ok": failure is None,
+                "last_error": failure,
             }
             if backfill:
                 # An echo, not an acknowledgement. A page of old rows says
@@ -7555,7 +7580,7 @@ class Collector:
                 ack = cursor
                 fields["backfill_last_at"] = fields["last_ingest_at"]
             else:
-                ack = cursor if landing else (acked if acked is not None else 0)
+                ack = (acked or 0) if failure else cursor
                 known = self.messages_state().get("cursor")
                 # Never backwards. The Bridge is the one that decides where to
                 # resume; this number is what the panel shows and what a second
@@ -7563,7 +7588,10 @@ class Collector:
                 # batch must not rewind it.
                 fields["cursor"] = (max(ack, known) if isinstance(known, int)
                                     else ack)
-            self.messages_write_state(**fields)
+            if not self.messages_write_state(**fields):
+                return None, "cannot write the Messages ingest state", 503
+            if failure:
+                return None, failure, 503
 
         reply = {"ok": True, "stored": stored, "duplicates": duplicates,
                  "cursor_ack": ack}
@@ -7964,7 +7992,7 @@ class Collector:
                 return mid
         return None
 
-    def messages_send(self, chat, body):
+    def messages_send(self, chat, body, request_id=None):
         """Queue one text for sending. (id, None, None) or (None, why, code).
 
         The only route on this channel whose effect leaves the house, so the
@@ -7986,30 +8014,37 @@ class Collector:
         """
         if not self.messages_dir():
             return None, "messages.base_dir is unset", 500
-        # Off the store: the conversation's own summary, or the allowlist entry
-        # naming it. Not out of the request, and not out of a scan either.
-        guid = self.messages_chat_guid(chat)
-        if guid is None:
-            return None, f"no conversation {chat}", 404
-
-        policy, _ = self.messages_policy(guid)
-        if policy not in ("confirm", "auto"):
-            # 403 rather than 404: the conversation is real and the request is
-            # well formed. What is missing is permission, and saying so is what
-            # lets the app draw "sending is off for this chat" instead of
-            # "something went wrong".
-            return None, "sending is not enabled for this conversation", 403
+        if request_id is not None and (not isinstance(request_id, str) or
+                not _MESSAGES_REQUEST_ID.fullmatch(request_id)):
+            return None, "request_id must be a lowercase UUID", 400
 
         with self._messages_lock:
             if not self.messages_ensure_dirs():
-                return None, "cannot create the messages store", 500
-            mid = self.messages_new_id()
+                return None, "cannot create the messages store", 503
+            mid = (messages_key("send:" + request_id) if request_id is not None
+                   else self.messages_new_id())
             if not mid:
                 return None, "could not mint a send id", 500
             path = self.messages_path("outbox", f"{mid}.json")
             spool = self.messages_path(MESSAGES_ACTIONS_NAME, f"send-{mid}")
             if not path or not spool:
                 return None, "could not place the send record", 500
+
+            if os.path.exists(path):
+                existing = self.messages_json("outbox", f"{mid}.json")
+                if existing is None:
+                    return None, "cannot verify the existing send", 503
+                if (request_id is None or existing.get("request_id") != request_id
+                        or existing.get("chat_key") != chat or existing.get("body") != body):
+                    return None, "send id is already in use", 409
+                return mid, None, None
+
+            guid = self.messages_chat_guid(chat)
+            if guid is None:
+                return None, f"no conversation {chat}", 404
+            policy, read = self.messages_policy(guid)
+            if not read or policy != "confirm":
+                return None, "sending is not enabled for this conversation", 403
 
             doc = {
                 "id": mid,
@@ -8027,14 +8062,14 @@ class Collector:
                 "disposition": None,
                 "retry_safe": None,
             }
+            if request_id is not None:
+                doc["request_id"] = request_id
             if not write_atomic(path, json.dumps(doc, indent=2)):
-                return None, "cannot write the send record", 500
-            if not write_atomic(spool, mid):
-                # The record exists and says queued, and this box has no note of
-                # it. Said out loud rather than answered ok, because a SEND that
-                # succeeded and then sat there forever is the failure a person
-                # cannot diagnose.
-                return None, "cannot record the queued send", 500
+                return None, "cannot write the send record", 503
+            # The Bridge pulls queued records directly from outbox/. This
+            # marker is informational. Once the record lands, submission has
+            # succeeded even if the marker cannot be written.
+            write_atomic(spool, mid)
         return mid, None, None
 
     def messages_thread_outbox(self, chat):
@@ -8101,6 +8136,7 @@ class Collector:
                 continue
             items.append({
                 "id": doc.get("id"),
+                "request_id": doc.get("request_id"),
                 "status": doc.get("status"),
                 "body": doc.get("body"),
                 "at": doc.get("at"),
@@ -8111,6 +8147,7 @@ class Collector:
                 "message_id": doc.get("message_id"),
                 "error": doc.get("error"),
                 "disposition": doc.get("disposition"),
+                "retry_safe": doc.get("retry_safe"),
             })
             if len(items) >= MESSAGES_THREAD_OUTBOX_MAX:
                 break
@@ -8162,9 +8199,8 @@ class Collector:
         The Bridge is the only writer of these fields, and it writes each of
         them once: a send is one attempt, reported honestly, and nothing on
         either side retries it. A report naming a record that is not queued any
-        more is refused rather than applied, because the second report on one
-        send is either a Bridge bug or a replay and neither should overwrite the
-        first answer.
+        more is accepted only when its outcome matches the recorded one. This
+        lets a Bridge retry a lost HTTP acknowledgement across a restart.
 
         The audit line is written before the record turns, because it is the
         only permanent copy: an outward action this system took has a line in
@@ -8182,6 +8218,11 @@ class Collector:
             if doc is None:
                 return None, f"no queued send {mid}", 404
             if doc.get("status") != "queued":
+                fields = (("guid", "message_id") if report["status"] == "sent"
+                          else ("error", "disposition", "retry_safe"))
+                if (doc.get("status") == report["status"] and
+                        all(doc.get(field) == report.get(field) for field in fields)):
+                    return True, None, None
                 return None, f"send {mid} is already {doc.get('status')}", 409
 
             state = report["status"]
@@ -8240,6 +8281,15 @@ class Collector:
     # asserts containment over the top of all three, the same belt and braces
     # every other path in this store gets.
 
+    def messages_attachment_permission(self, record):
+        allowlist = self.messages_import_allowlist()
+        if allowlist is None:
+            return "cannot read the Messages allowlist", 503
+        entry = allowlist.get(record.get("chat_guid"))
+        if not isinstance(entry, dict) or entry.get("read") is not True:
+            return "reading is not enabled for this conversation", 403
+        return None, None
+
     def messages_attachment_staging(self, key, n):
         """Where an upload's bytes are written before they are named.
         (path, None, None) or (None, why, code).
@@ -8260,6 +8310,9 @@ class Collector:
             record = self.messages_record(key)
             if record is None:
                 return None, f"no message {key}", 404
+            why, code = self.messages_attachment_permission(record)
+            if why:
+                return None, why, code
             listed = record.get("attachments")
             if not isinstance(listed, list) or n >= len(listed):
                 return None, f"no attachment {n} on {key}", 404
@@ -8312,6 +8365,10 @@ class Collector:
             if record is None or not index:
                 scrap()
                 return None, f"no message {key}", 404
+            why, code = self.messages_attachment_permission(record)
+            if why:
+                scrap()
+                return None, why, code
             listed = record.get("attachments")
             if not isinstance(listed, list) or n >= len(listed):
                 scrap()
@@ -9235,6 +9292,11 @@ def parse_messages_report(doc):
 
     out = {"status": state}
     if state == "sent":
+        # Older Bridges report the SQLite row ID as a JSON integer. Keep
+        # its stored and wire form identical to the newer string report.
+        row_id = doc.get("message_id")
+        if type(row_id) is int and row_id >= 0:
+            doc = dict(doc, message_id=str(row_id))
         for field in ("guid", "message_id"):
             value, why = _messages_str(doc, field, MESSAGES_GUID_CHARS)
             if why:
@@ -9933,10 +9995,16 @@ def make_handler(collector, token):
             # The send. The id comes back because it is the record the app polls
             # for the turn to sent or failed; the conversation GUID does not,
             # because the app never chose it.
-            mid, why, code = collector.messages_send(chat, body)
+            request_id = doc.get("request_id")
+            if "request_id" in doc and request_id is None:
+                return self._json(400, {"error": "request_id must be a lowercase UUID"})
+            mid, why, code = collector.messages_send(chat, body, request_id)
             if mid is None:
                 return self._json(code or 500, {"error": why})
-            return self._json(200, {"ok": True, "id": mid})
+            receipt = {"ok": True, "id": mid}
+            if request_id is not None:
+                receipt["request_id"] = request_id
+            return self._json(200, receipt)
 
         def _refuse(self):
             self._json(405, {"error": "read-only server"})

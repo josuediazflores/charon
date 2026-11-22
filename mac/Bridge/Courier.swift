@@ -32,8 +32,7 @@ actor Courier {
     /// it meant to.
     private var uploader: Attachments?
 
-    private var seen: Set<String> = []
-    private var seenOrder: [String] = []
+    private var journal: DeliveryJournal?
     private var poked = false
     private var probedAt = Date.distantPast
     private var toldAboutProbe = false
@@ -49,10 +48,6 @@ actor Courier {
         self.collector = collector
         self.log = log
         self.dryRun = dryRun
-        if let stored = Store.read(OutboxSeen.self, from: core.paths.outboxSeenFile) {
-            seenOrder = stored.ids
-            seen = Set(stored.ids)
-        }
     }
 
     func pair(with watcher: Watcher) { self.watcher = watcher }
@@ -116,6 +111,20 @@ actor Courier {
     // MARK: - the outbox
 
     private func drainOutbox() async {
+        do {
+            if journal == nil {
+                journal = try DeliveryJournal(file: core.paths.outboxSeenFile)
+            }
+        } catch {
+            await core.note(error: "outbox journal unavailable; sends are paused")
+            return
+        }
+        guard let journal else { return }
+        let pending = journal.state.reports
+        for (id, report) in pending where isKey(id) {
+            await deliver(id, report)
+        }
+
         let reply: JSONValue
         do {
             reply = try await collector.get("/v1/messages/outbox?status=queued")
@@ -125,30 +134,23 @@ actor Courier {
         }
         let items = (reply["items"]?.arrayValue ?? [])
             .compactMap { try? $0.decode(OutboxItem.self) }
-        for item in items where !seen.contains(item.id) {
-            // Seen first, attempted second. The order is the guarantee.
-            remember(item.id)
-            await perform(item)
+        var handled = Set(pending.keys)
+        for item in items where isKey(item.id) && handled.insert(item.id).inserted {
+            let previouslySeen = journal.state.ids.contains(item.id)
+            guard journal.begin(item.id) else {
+                await core.note(error: "cannot record an outbox attempt; sends are paused")
+                return
+            }
+            if previouslySeen {
+                // A legacy journal knows the helper was called, but lost its answer.
+                await deliver(item.id, DeliveryJournal.interrupted)
+            } else {
+                await perform(item)
+            }
         }
-    }
-
-    private func remember(_ id: String) {
-        seen.insert(id)
-        seenOrder.append(id)
-        if seenOrder.count > OutboxSeen.keep {
-            let dropped = seenOrder.prefix(seenOrder.count - OutboxSeen.keep)
-            for old in dropped { seen.remove(old) }
-            seenOrder.removeFirst(seenOrder.count - OutboxSeen.keep)
-        }
-        Store.write(OutboxSeen(ids: seenOrder), to: core.paths.outboxSeenFile)
     }
 
     private func perform(_ item: OutboxItem) async {
-        guard isKey(item.id) else {
-            log.warn("an outbox item arrived with an id this program will not put in a URL")
-            return
-        }
-
         let allowlist = await core.allowlist
         let policy = allowlist.policy(guid: item.chatGuid, key: item.chatKey)
         guard let policy, policy.read, policy.send == "confirm" else {
@@ -172,22 +174,28 @@ actor Courier {
             return
         }
 
+        let session: RPCSession
         do {
-            let session = try await supervisor.session()
+            session = try await supervisor.session()
+        } catch {
+            await report(item.id, failed: "helper", disposition: "not_started", retrySafe: true)
+            return
+        }
+        do {
             let result = try await session.call(
                 "send", ["chat_guid": .string(chatGuid), "text": .string(body)], timeout: 15)
-            if result["ok"]?.boolValue == false {
-                await report(item.id, failed: "send", disposition: nil, retrySafe: nil)
+            if result["ok"]?.boolValue != true {
+                await report(item.id, failed: "send", disposition: "may_have_completed", retrySafe: false)
                 return
             }
             log.info("sent one reply")
             await report(item.id,
                          sent: result["guid"]?.stringValue,
-                         messageId: result["id"]?.intValue)
+                         messageId: result["id"]?.stringValue ?? result["id"]?.intValue.map(String.init))
         } catch let trouble as RPCError {
             await fail(item, trouble)
         } catch {
-            await report(item.id, failed: "send", disposition: nil, retrySafe: nil)
+            await report(item.id, failed: "send", disposition: "may_have_completed", retrySafe: false)
         }
     }
 
@@ -198,8 +206,8 @@ actor Courier {
         // is replaced -- its mutation lane is poisoned either way.
         let unknown = code == -32001
         let blocked = code == -32004
-        let disposition = trouble.disposition ?? (unknown ? "may_have_completed" : nil)
-        let retrySafe = trouble.retrySafe ?? (unknown ? false : nil)
+        let disposition = unknown ? "may_have_completed" : (trouble.disposition ?? "may_have_completed")
+        let retrySafe = disposition == "not_started" && trouble.retrySafe == true
         let named = code.map { "rpc\($0)" } ?? "helper"
 
         log.error("a send failed: \(trouble.description)")
@@ -213,11 +221,11 @@ actor Courier {
 
     // MARK: - reporting back
 
-    private func report(_ id: String, sent guid: String?, messageId: Int?) async {
+    private func report(_ id: String, sent guid: String?, messageId: String?) async {
         var body: [String: JSONValue] = ["status": .string("sent")]
         if let guid { body["guid"] = .string(guid) }
-        if let messageId { body["message_id"] = .int(messageId) }
-        await deliver(id, .object(body))
+        if let messageId { body["message_id"] = .string(messageId) }
+        await recordAndDeliver(id, .object(body))
     }
 
     private func report(_ id: String, failed error: String,
@@ -225,31 +233,33 @@ actor Courier {
         var body: [String: JSONValue] = ["status": .string("failed"), "error": .string(error)]
         if let disposition { body["disposition"] = .string(disposition) }
         if let retrySafe { body["retry_safe"] = .bool(retrySafe) }
-        await deliver(id, .object(body))
+        await recordAndDeliver(id, .object(body))
     }
 
-    /// The one thing worth retrying: telling the Pi what happened. The send is
-    /// over either way, and a report that never lands leaves an item queued in
-    /// the console with no explanation attached to it.
+    private func recordAndDeliver(_ id: String, _ report: JSONValue) async {
+        if journal?.record(id, report: report) != true {
+            await core.note(error: "could not save the outbox outcome locally")
+        }
+        await deliver(id, report)
+    }
+
+    /// Retry only the report on the existing poll. An older collector returns
+    /// 409 after recording a terminal result when its first response was lost.
     private func deliver(_ id: String, _ report: JSONValue) async {
-        // Section 2 asks every request with a body to name the protocol it
-        // speaks, and section 5's table for this route does not show it. The
-        // blanket rule wins: a collector that checks will find it, and one
-        // that does not will ignore it.
         var body = report.objectValue ?? [:]
         body["protocol"] = .int(1)
-        for attempt in 1...3 {
-            do {
-                _ = try await collector.post("/v1/messages/outbox/\(id)", .object(body))
-                return
-            } catch {
-                log.warn("outbox report attempt \(attempt) failed: \(error.redacted)")
-                if attempt < 3 {
-                    try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1e9))
-                }
-            }
+        do {
+            let reply = try await collector.post("/v1/messages/outbox/\(id)", .object(body))
+            guard reply["ok"]?.boolValue == true else { throw Collector.Failure.malformed }
+        } catch Collector.Failure.http(409) {
+            log.warn("collector already has a terminal outbox result")
+        } catch {
+            log.warn("outbox report is pending: \(error.redacted)")
+            return
         }
-        await core.note(error: "an outbox report could not be delivered")
+        if journal?.acknowledged(id) != true {
+            await core.note(error: "could not save acknowledgment of the outbox report")
+        }
     }
 
     /// Section 3: check the shape before it goes in a URL.

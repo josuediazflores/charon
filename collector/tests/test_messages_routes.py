@@ -95,6 +95,15 @@ def build(tmp, **overrides):
     return C.Collector(cfg)
 
 
+def allow_fixture_chats(collector, *guids):
+    config = collector.messages_config_get()
+    for guid in guids:
+        config["chats"][guid] = {"read": True, "send": "off"}
+    ok, why, _ = collector.messages_config_put(config)
+    if not ok:
+        raise AssertionError(why)
+
+
 class MessagesRoutes(unittest.TestCase):
     """One server for the whole class, and numbered methods.
 
@@ -187,6 +196,7 @@ class MessagesRoutes(unittest.TestCase):
         self.assertIsNone(snap["data"])
 
     def test_04_ingest(self):
+        allow_fixture_chats(self.collector, CHAT_A_GUID, CHAT_B_GUID)
         first = event("guid-a-1", CHAT_A_GUID, "are we still on for 6?", 100)
         status, doc = self.call("POST", "/v1/messages/ingest",
                                 {"protocol": 1, "events": [first],
@@ -413,6 +423,8 @@ class MessagesRoutes(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_08c_your_own_live_reply_clears_the_conversation(self):
+        self.addCleanup(self.collector.messages_config_put, self.collector.messages_config_get())
+        allow_fixture_chats(self.collector, "iMessage;-;+14085550777")
         # Two live rows into CHAT_A: hers, then his. After his, nothing is
         # waiting: the summary says 0, the read mark sits on his key, and the
         # thread head carries the same count the list does.
@@ -904,6 +916,48 @@ class MessagesRoutes(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("backfill", doc["error"])
 
+    def test_20_idempotent_send_wire_contract(self):
+        request_id = "9e284d8e-0959-4b5c-99fd-aac2bab0cdef"
+        body = {"chat_key": CHAT_A, "body": "wire test", "request_id": request_id}
+        config = self.collector.messages_config_get()
+        config["chats"][CHAT_A_GUID] = {"read": True, "send": "confirm"}
+        self.collector.messages_config_put(config)
+        status, first = self.call("POST", "/v1/messages/send", body)
+        self.assertEqual(status, 200)
+        self.assertEqual(first.get("request_id"), request_id)
+        self.assertEqual(self.call("POST", "/v1/messages/send", body), (200, first))
+        for invalid in (None, "", [], "not-a-uuid"):
+            status, _ = self.call("POST", "/v1/messages/send", dict(body, request_id=invalid))
+            self.assertEqual(status, 400)
+        status, thread = self.call("GET", f"/v1/messages/thread/{CHAT_A}")
+        self.assertEqual(status, 200)
+        self.assertIn(request_id, [row.get("request_id") for row in thread["outbox"]])
+
+    def test_21_numeric_sent_row_id_matches_its_text_replay(self):
+        config = self.collector.messages_config_get()
+        config["chats"][CHAT_A_GUID] = {"read": True, "send": "confirm"}
+        self.collector.messages_config_put(config)
+        for initial, replay in ((1979, "1979"), ("0", 0)):
+            with self.subTest(initial=initial):
+                status, send = self.call("POST", "/v1/messages/send",
+                                         {"chat_key": CHAT_A, "body": "wire test"})
+                self.assertEqual(status, 200)
+                mid = send["id"]
+                path = f"/v1/messages/outbox/{mid}"
+                report = {"protocol": 1, "status": "sent", "guid": "test-guid"}
+                for invalid in (True, False, -1, 1979.5):
+                    status, _ = self.call("POST", path, dict(report, message_id=invalid))
+                    self.assertEqual(status, 400)
+                for row_id in (initial, replay):
+                    status, _ = self.call("POST", path, dict(report, message_id=row_id))
+                    self.assertEqual(status, 200)
+                status, thread = self.call("GET", f"/v1/messages/thread/{CHAT_A}")
+                self.assertEqual(status, 200)
+                row = next(item for item in thread["outbox"] if item["id"] == mid)
+                self.assertEqual((row["status"], row["message_id"]), ("sent", str(initial)))
+                with open(self.path("audit.log")) as fh:
+                    self.assertEqual(sum(f"sent id={mid} " in line for line in fh), 1)
+
 
 class ChatSummaries(unittest.TestCase):
     """The per-conversation summaries under `messages/.chats/`.
@@ -924,6 +978,7 @@ class ChatSummaries(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="charon-chats-")
         self.collector = build(self.tmp)
+        allow_fixture_chats(self.collector, CHAT_A_GUID, CHAT_B_GUID, CHAT_C_GUID)
         self.store = os.path.join(self.tmp, "messages")
 
     def tearDown(self):
@@ -1218,6 +1273,7 @@ class ThreadIndex(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="charon-threads-")
         self.collector = build(self.tmp)
+        allow_fixture_chats(self.collector, CHAT_A_GUID, CHAT_B_GUID, CHAT_C_GUID)
         self.store = os.path.join(self.tmp, "messages")
 
     def tearDown(self):
@@ -1666,6 +1722,7 @@ class Attachments(unittest.TestCase):
     # -- the stages ----------------------------------------------------------
 
     def test_01_ingest_records_what_is_attached(self):
+        allow_fixture_chats(self.collector, CHAT_A_GUID)
         row = with_attachments(
             "guid-att-1", CHAT_A_GUID, "look at this", 500,
             [dict(PHOTO_META), dict(CLIP_META), dict(GONE_META)])
