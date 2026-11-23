@@ -83,6 +83,23 @@ A Mac user can map a reading from a small JSON document to a card. For example, 
 
 Charon's built-in telemetry presets use its authenticated collector connection. The custom JSON URL reader sends no collector token. For a protected source, use a built-in metric when it fits or paste a sanitized JSON snapshot. The [agent widget design guide](../mac/Resources/WidgetHelp/AGENT-WIDGET-DESIGN.md) explains the supported formats and how to add a provider in Swift.
 
+## CMO routines in Settings
+
+In Live mode, **Settings → Features → CMO** controls jobs on the connected Pi for all clients. Off stops the registered timer and queue watcher and their workers, including an active briefing. A systemd condition checks a persistent pause marker before starting any of those units again, including after reboot. On restores only previously active triggers. A persistent timer may run a missed brief after resuming. Saved briefing files and queued questions stay on the Pi.
+
+Install the matching collector code and register the existing CMO units once as an administrator. Use the collector’s systemd service account. The unit names below are examples. Supply the actual pairs from this installation. Use `--no-jobs` instead of the pairs only for a collector with no CMO jobs.
+
+
+```sh
+sudo python3 install-cmo-control.py --user pi \
+    --pair my-briefing.timer:my-briefing.service \
+    --pair my-briefing-ask.path:my-briefing-ask.service
+```
+
+Registration installs per-unit conditions and a polkit rule allowing the service account to stop those named units and start those named triggers. It reloads unit definitions without starting jobs or enabling timers. The operator must register every CMO trigger on this host. Independent cloud schedules need their own control. Mail, Messages and other independently owned workers keep their own schedules.
+
+An authenticated bearer POST to `/v1/cmo/routines` with `{}` reads the state. Sending `{"enabled":false}` pauses it and `{"enabled":true}` resumes it. If stopping or restarting fails, check Settings again and retry. Missing registration or failed verification shows an unavailable state. Demo operates locally.
+
 ## Endpoints
 
 | method | path | auth | returns |

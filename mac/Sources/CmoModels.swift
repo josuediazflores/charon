@@ -1180,3 +1180,8 @@ extension JarvisJob: Decodable {
         elapsedS = try? c.decodeIfPresent(Double.self, forKey: .elapsedS)
     }
 }
+
+struct CmoRoutineStatus: Decodable {
+    let enabled: Bool?
+    let retryEnabled: Bool?
+}

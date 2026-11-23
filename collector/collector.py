@@ -9431,6 +9431,22 @@ def make_handler(collector, token):
             except ValueError:
                 return None, "body is not valid JSON"
 
+        def _cmo_routines(self, write=False):
+            from cmo_control import CmoControl
+            requested = None
+            if write:
+                doc, error = self._read_body(128)
+                if error or not isinstance(doc, dict) or (doc and
+                        (set(doc) != {"enabled"} or type(doc["enabled"]) is not bool)):
+                    return self._json(400, {"error": "Expected {} or a boolean enabled field."})
+                requested = doc.get("enabled")
+            try:
+                state = CmoControl().apply(requested)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                message = str(exc) if isinstance(exc, RuntimeError) else "Cannot verify CMO jobs. Check the Pi units and permissions."
+                return self._json(503, {"error": message})
+            return self._json(200, state)
+
         def do_POST(self):
             """The two curation routes, the ask route, and the mailbox's five.
             Everything else is still read-only.
@@ -9461,7 +9477,18 @@ def make_handler(collector, token):
                 self.close_connection = True
                 return self._deny()
 
+            if path == "/v1/cmo/routines":
+                if not self.headers.get("Authorization", "").startswith("Bearer ") or not hmac.compare_digest(
+                        self.headers["Authorization"][7:], token):
+                    self.close_connection = True
+                    return self._deny()
+                return self._cmo_routines(write=True)
+
             if path == ASK_ROUTE:
+                from cmo_control import STATE
+                if (STATE / "cmo-paused.json").exists():
+                    self.close_connection = True
+                    return self._json(409, {"error": "CMO routines are paused."})
                 return self._ask()
 
             # `new` before the thread pattern, because `new` is a legal slug.

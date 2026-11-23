@@ -129,13 +129,23 @@ struct SettingsView: View {
         Panel(title: "Features") {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(ConsoleFeature.allCases, id: \.self) { feature in
-                    ToggleRow(label: ConsoleNav.label(feature.rawValue),
-                              on: settings.isEnabled(feature)) {
-                        settings.setEnabled(!settings.isEnabled(feature), for: feature)
+                    if feature == .cmo && model.connection.mode == .live {
+                        let client = model.store as? LiveClient
+                        CmoRoutineSetting(client: client) { enabled in
+                            if let client, model.store === client, model.connection.mode == .live {
+                                settings.setEnabled(enabled, for: .cmo)
+                            }
+                        }
+                        .id(ObjectIdentifier(model.store))
+                    } else {
+                        ToggleRow(label: ConsoleNav.label(feature.rawValue),
+                                  on: settings.isEnabled(feature)) {
+                            settings.setEnabled(!settings.isEnabled(feature), for: feature)
+                        }
                     }
                 }
                 SettingsNote("Choose which features are available in Charon on this Mac. "
-                             + "Pi services and Charon Bridge run independently.")
+                             + "The live CMO switch also controls the registered Pi jobs.")
             }
         }
     }
@@ -795,5 +805,49 @@ private struct SettingsNote: View {
             .padding(.leading, HT.cw2)
             .padding(.top, HT.s1)
             .padding(.bottom, HT.cw3)
+    }
+}
+
+private struct CmoRoutineSetting: View {
+    let client: LiveClient?
+    let confirmed: (Bool) -> Void
+    @State private var status: CmoRoutineStatus?
+    @State private var busy = false
+    @State private var issue: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: HT.s1) {
+            if busy {
+                DotLeader(label: "CMO", value: "Checking Pi…")
+            } else if let enabled = status?.enabled {
+                ToggleRow(label: "CMO", on: enabled) { Task { await update(!enabled) } }
+            } else if let retry = status?.retryEnabled {
+                DotLeader(label: "CMO", value: "Change incomplete")
+                KeyButton(retry ? "Retry resume" : "Retry pause") { Task { await update(retry) } }
+            } else {
+                DotLeader(label: "CMO", value: "Unconfirmed")
+                KeyButton("Check Pi status") { Task { await update(nil) } }
+            }
+            SettingsNote(issue ?? "Off stops the Pi’s registered CMO schedules and active workers, including the daily brief. On resumes the schedules that were running before the pause.")
+        }
+        .task { await update(nil) }
+    }
+
+    @MainActor
+    private func update(_ enabled: Bool?) async {
+        guard !busy else { return }
+        guard let client else { issue = "Connect to the collector to manage CMO."; return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.cmoRoutines(enabled: enabled)
+            try Task.checkCancellation()
+            status = result
+            issue = nil
+            if let enabled = result.enabled { confirmed(enabled) }
+        } catch {
+            status = nil
+            issue = error.localizedDescription
+        }
     }
 }
