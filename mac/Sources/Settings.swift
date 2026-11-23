@@ -15,7 +15,7 @@ enum AfterArchive: String {
 }
 
 enum ConsoleFeature: String, CaseIterable {
-    case mail, messages, chat, jarvis
+    case cmo, mail, messages, chat, jarvis
 }
 
 /* The console's own preferences, ported from `state/mailSettings.ts`'s

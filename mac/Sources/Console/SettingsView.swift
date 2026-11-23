@@ -114,7 +114,9 @@ struct SettingsView: View {
                     if settings.isEnabled(.messages) {
                         Cell(span: 12) { messages }
                     }
-                    Cell(span: 12) { briefing }
+                    if settings.isEnabled(.cmo) {
+                        Cell(span: 12) { briefing }
+                    }
                     Cell(span: 12) { console }
                     Cell(span: 12) { machine }
                 }
