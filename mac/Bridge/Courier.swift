@@ -136,6 +136,7 @@ actor Courier {
             .compactMap { try? $0.decode(OutboxItem.self) }
         var handled = Set(pending.keys)
         for item in items where isKey(item.id) && handled.insert(item.id).inserted {
+            guard !Task.isCancelled else { return }
             let previouslySeen = journal.state.ids.contains(item.id)
             guard journal.begin(item.id) else {
                 await core.note(error: "cannot record an outbox attempt; sends are paused")

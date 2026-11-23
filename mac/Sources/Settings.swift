@@ -18,6 +18,13 @@ enum ConsoleFeature: String, CaseIterable {
     case cmo, mail, messages, chat, jarvis
 }
 
+struct FeatureRoutineStatus: Decodable {
+    let enabled: Bool?
+    let retryEnabled: Bool?
+    let waitingForBridge: Bool?
+    let finishingWork: Bool?
+}
+
 /* The console's own preferences, ported from `state/mailSettings.ts`'s
  * `charon-settings-v1` blob.
  *

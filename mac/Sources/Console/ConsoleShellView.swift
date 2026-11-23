@@ -153,6 +153,9 @@ struct ConsoleShellView: View {
         // The Window menu and the title bar read this. One destination, one
         // name, and no second opinion about where you are.
         .navigationTitle(ConsoleNav.label(tab))
+        .onChange(of: settings.isEnabled(.messages)) { _, enabled in
+            if !enabled { model.cancelHeldMessages() }
+        }
         .onChange(of: settings.isTabAvailable(tab)) { _, available in
             if !available { tab = "overview" }
         }

@@ -129,11 +129,12 @@ struct SettingsView: View {
         Panel(title: "Features") {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(ConsoleFeature.allCases, id: \.self) { feature in
-                    if feature == .cmo && model.connection.mode == .live {
+                    if model.connection.mode == .live {
                         let client = model.store as? LiveClient
-                        CmoRoutineSetting(client: client) { enabled in
+                        FeatureRoutineSetting(feature: feature, client: client,
+                                              access: model.payload?.featureAccess?[feature.rawValue]) { enabled in
                             if let client, model.store === client, model.connection.mode == .live {
-                                settings.setEnabled(enabled, for: .cmo)
+                                model.confirmFeature(enabled, for: feature)
                             }
                         }
                         .id(ObjectIdentifier(model.store))
@@ -144,8 +145,9 @@ struct SettingsView: View {
                         }
                     }
                 }
-                SettingsNote("Choose which features are available in Charon on this Mac. "
-                             + "The live CMO switch also controls the registered Pi jobs.")
+                SettingsNote(model.connection.mode == .live
+                    ? "Off pauses this feature on the connected Pi and hides its tab. On resumes its previously active jobs. Saved work stays available for resume."
+                    : "Choose which features appear in Demo on this Mac.")
             }
         }
     }
@@ -639,13 +641,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 DotLeader(label: "where these are saved", value: "this mac",
                           labelInk: HT.inkBright)
-                SettingsNote("In this app's own preferences on this Mac, and they never reach "
-                             + "the Pi, on purpose: a narrow window on a laptop and a wide one "
-                             + "on the desk want different answers to most of these, and a "
-                             + "preference synced between them would force one of the two to "
-                             + "be wrong. The collector's address is here too; the token is "
-                             + "not: that lives in the Keychain, which is the one thing on "
-                             + "this page that is not a preference.")
+                SettingsNote("Appearance and Demo preferences are saved on this Mac. Live feature switches are saved on the connected Pi and apply to every connected Mac. The collector token is stored in Keychain.")
             }
         }
     }
@@ -808,43 +804,61 @@ private struct SettingsNote: View {
     }
 }
 
-private struct CmoRoutineSetting: View {
+private struct FeatureRoutineSetting: View {
+    let feature: ConsoleFeature
+    private var label: String { ConsoleNav.label(feature.rawValue) }
     let client: LiveClient?
+    let access: Bool?
     let confirmed: (Bool) -> Void
-    @State private var status: CmoRoutineStatus?
+    @State private var status: FeatureRoutineStatus?
     @State private var busy = false
     @State private var issue: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: HT.s1) {
             if busy {
-                DotLeader(label: "CMO", value: "Checking Pi…")
+                DotLeader(label: label, value: "Checking Pi…")
             } else if let enabled = status?.enabled {
-                ToggleRow(label: "CMO", on: enabled) { Task { await update(!enabled) } }
+                ToggleRow(label: label, on: enabled) { Task { await update(!enabled) } }
+            } else if status?.finishingWork == true {
+                DotLeader(label: label, value: "Finishing active work")
+                KeyButton("Check again") { Task { await update(nil) } }
+                KeyButton("Resume") { Task { await update(true) } }
+            } else if status?.waitingForBridge == true {
+                DotLeader(label: label, value: "Waiting for Bridge")
+                SettingsNote("Each registered Mac must connect and confirm its Messages work has stopped.")
+                KeyButton("Check again") { Task { await update(nil) } }
+                KeyButton("Resume Messages") { Task { await update(true) } }
             } else if let retry = status?.retryEnabled {
-                DotLeader(label: "CMO", value: "Change incomplete")
+                DotLeader(label: label, value: "Change incomplete")
                 KeyButton(retry ? "Retry resume" : "Retry pause") { Task { await update(retry) } }
             } else {
-                DotLeader(label: "CMO", value: "Unconfirmed")
+                DotLeader(label: label, value: "Unconfirmed")
                 KeyButton("Check Pi status") { Task { await update(nil) } }
             }
-            SettingsNote(issue ?? "Off stops the Pi’s registered CMO schedules and active workers, including the daily brief. On resumes the schedules that were running before the pause.")
+            if let issue { SettingsNote(issue) }
         }
         .task { await update(nil) }
+        .onChange(of: access) { _, value in
+            if let value, status?.enabled != value {
+                Task { await update(nil) }
+            }
+        }
     }
 
     @MainActor
     private func update(_ enabled: Bool?) async {
         guard !busy else { return }
-        guard let client else { issue = "Connect to the collector to manage CMO."; return }
+        guard let client else { issue = "Connect to the collector to manage this feature."; return }
         busy = true
         defer { busy = false }
         do {
-            let result = try await client.cmoRoutines(enabled: enabled)
+            let result = try await client.featureRoutines(feature, enabled: enabled)
             try Task.checkCancellation()
             status = result
             issue = nil
             if let enabled = result.enabled { confirmed(enabled) }
+            else if result.retryEnabled == false { confirmed(false) }
         } catch {
             status = nil
             issue = error.localizedDescription

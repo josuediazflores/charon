@@ -38,6 +38,7 @@ actor Backfill {
     private var queue: [String] = []
     private var current: String?
     private var running = false
+    private var stopped = false
     private var runner: Task<Void, Never>?
     private var blockedUntil = Date.distantPast
 
@@ -91,7 +92,7 @@ actor Backfill {
             .map(\.guid)
             .filter { $0 != current }
 
-        guard !queue.isEmpty, !running, Date() >= blockedUntil else { return }
+        guard !stopped, !queue.isEmpty, !running, Date() >= blockedUntil else { return }
         running = true
         runner = Task { await self.drain() }
     }
@@ -99,8 +100,10 @@ actor Backfill {
     /// The process is going. Whatever page is in flight is abandoned; the mark
     /// on disk is the last one that landed, which is where the next run picks
     /// the conversation up.
-    func stop() {
+    func stop() async {
+        stopped = true
         runner?.cancel()
+        await runner?.value
         runner = nil
     }
 

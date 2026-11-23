@@ -96,7 +96,26 @@ sudo python3 install-cmo-control.py --user pi \
     --pair my-briefing-ask.path:my-briefing-ask.service
 ```
 
-Registration installs per-unit conditions and a polkit rule allowing the service account to stop those named units and start those named triggers. It reloads unit definitions without starting jobs or enabling timers. The operator must register every CMO trigger on this host. Independent cloud schedules need their own control. Mail, Messages and other independently owned workers keep their own schedules.
+Registration installs per-unit conditions and a narrow polkit rule for the collector account. It reloads unit definitions without starting jobs or enabling timers.
+
+### Pause any feature
+
+All five live Features switches control the connected collector. Register every installed timer, path watcher, worker service and standalone daemon owned by each feature. Registration is explicit so an incomplete installation can report Unconfirmed. Existing CMO registrations still work.
+
+Use the actual service account and unit names. For example:
+
+```sh
+sudo python3 install-feature-control.py --user pi --feature chat \
+  --pair halftone-chat.path:halftone-chat.service
+sudo python3 install-feature-control.py --user pi --feature jarvis \
+  --pair halftone-jarvis-say.path:halftone-jarvis-say.service \
+  --pair halftone-jarvis-job.path:halftone-jarvis-job.service
+```
+
+For Mail, register the poll timer, triage path and actions path with their workers. Include a dedicated inbound daemon with `--service mail-ingest.service` if installed and owned by this feature. For Messages, register the triage path and worker and pass `--bridge HOST` for each Mac Bridge, using its reported hostname. Specify `--no-bridge` when there are none. Specify `--no-jobs` when a feature has no local systemd work. Update the collector before updating the Bridge. A Bridge with no control response suspends feature work until the Pi answers.
+
+Off blocks new feature requests and polling, stops registered jobs, and persists across reboots. A triggered Mail worker already running finishes its current activation before Settings confirms Off. This lets an SMTP send record its outcome before a later resume. Messages also waits for every registered Bridge to stop and acknowledge the current pause. The Bridge checks control every 30 seconds until it quits. An offline registered Mac leaves a pause pending until it reconnects. On restores previously active triggers and standalone services. Queued work can run after resume. Account providers, shared infrastructure and schedules hosted outside the collector require their own controls.
+
 
 An authenticated bearer POST to `/v1/cmo/routines` with `{}` reads the state. Sending `{"enabled":false}` pauses it and `{"enabled":true}` resumes it. If stopping or restarting fails, check Settings again and retry. Missing registration or failed verification shows an unavailable state. Demo operates locally.
 
@@ -294,9 +313,7 @@ sudo systemctl enable --now halftone-chat.path
 how the runner gets exercised off the Pi. Watch it with
 `journalctl -u halftone-chat -f`: one line per turn.
 
-Turning the feature off is `sudo systemctl disable --now halftone-chat.path`.
-Messages still file to disk after that and simply never get answered, which the
-CHAT tab draws as queued — the true state.
+Use Settings → Features → Chat to pause the API and the registered queue worker together.
 
 ## Security
 

@@ -163,6 +163,8 @@ class Handler(BaseHTTPRequestHandler):
                               "stored": len(body.get("events", [])),
                               "duplicates": 0,
                               "cursor_ack": body.get("cursor")})
+        elif path == "/v1/messages/bridge-control":
+            self.answer(200, {"enabled": True})
         elif path == "/v1/messages/bridge":
             self.answer(200, {"ok": True})
         elif path == "/v1/messages/chats":

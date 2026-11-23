@@ -78,6 +78,15 @@ final class MailModel {
     private(set) var readHereChats: Set<String> = []
 
     private(set) var messageDelivery = MessageDeliveryLedger()
+    private var featureRevision = 0
+
+    func confirmFeature(_ enabled: Bool, for feature: ConsoleFeature) {
+        featureRevision += 1
+        if ConsoleSettings.shared.isEnabled(feature) != enabled {
+            ConsoleSettings.shared.setEnabled(enabled, for: feature)
+        }
+    }
+
     private var messageTimers: [String: Task<Void, Never>] = [:]
 
     // MARK: - wiring
@@ -170,12 +179,21 @@ final class MailModel {
         let target = store
         messageTimers[request.id] = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            guard let self, messageDelivery.begin(request) else { return }
+            guard let self else { return }
+            guard ConsoleSettings.shared.isEnabled(.messages) else {
+                _ = undoMessage(request.id)
+                return
+            }
+            guard messageDelivery.begin(request) else { return }
             let outcome = await target.send(request)
             guard !Task.isCancelled else { return }
             messageDelivery.complete(request, with: outcome)
             messageTimers[request.id] = nil
         }
+    }
+
+    func cancelHeldMessages() {
+        for id in Array(messageTimers.keys) { _ = undoMessage(id) }
     }
 
     func undoMessage(_ id: String) -> Bool {
@@ -196,11 +214,19 @@ final class MailModel {
         // of staleness that never happened.
         now = Date()
         let source = store
+        let revision = featureRevision
         do {
             let got = try await source.telemetry()
             // A connection change can complete while the previous collector is answering.
             guard source === store else { return }
             let at = Date()
+            if revision == featureRevision, connection.mode == .live, let access = got.featureAccess {
+                for (name, enabled) in access {
+                    guard let feature = ConsoleFeature(rawValue: name),
+                          ConsoleSettings.shared.isEnabled(feature) != enabled else { continue }
+                    ConsoleSettings.shared.setEnabled(enabled, for: feature)
+                }
+            }
             payload = got
             reachable = true
             hydrated = false

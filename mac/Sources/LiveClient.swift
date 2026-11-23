@@ -380,16 +380,16 @@ final class LiveClient: MailStore {
     // one.
 
     /// An empty request checks the Pi without changing its schedule.
-    func cmoRoutines(enabled: Bool? = nil) async throws -> CmoRoutineStatus {
+    func featureRoutines(_ feature: ConsoleFeature, enabled: Bool? = nil) async throws -> FeatureRoutineStatus {
         let body: [String: Any] = enabled.map { ["enabled": $0] } ?? [:]
-        let (data, response) = try await session.data(for: request("v1/cmo/routines", method: "POST", json: body))
+        let (data, response) = try await session.data(for: request("v1/\(feature.rawValue)/routines", method: "POST", json: body))
         let code = try check(response)
         guard code == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw NSError(domain: "CmoRoutines", code: code, userInfo: [NSLocalizedDescriptionKey:
-                code == 404 ? "Update the collector to manage CMO jobs." : (message ?? "Collector returned HTTP \(code).")])
+            throw NSError(domain: "FeatureRoutines", code: code, userInfo: [NSLocalizedDescriptionKey:
+                code == 404 ? "Update the collector to manage feature jobs." : (message ?? "Collector returned HTTP \(code).")])
         }
-        let status = try JSONDecoder().decode(CmoRoutineStatus.self, from: data)
+        let status = try JSONDecoder().decode(FeatureRoutineStatus.self, from: data)
         guard (status.enabled != nil) != (status.retryEnabled != nil) else { throw URLError(.cannotParseResponse) }
         return status
     }

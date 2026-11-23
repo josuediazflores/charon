@@ -211,3 +211,7 @@ construction.
 **It starts at now.** A first run has no cursor and subscribes from the present
 moment. Turning the channel on never replays a history nobody asked for.
 Allowing one conversation asks for that conversation's, and only that one's.
+
+### Pausing Messages
+
+Settings → Features → Messages on a live collector controls the Bridge on each registered Mac. Off stops the helper, watching, backfill, attachment uploads and outbox processing. A paused Bridge checks the collector every 30 seconds for resume. Quitting the Bridge stops that check. Install the matching collector first and register each Bridge hostname. Settings shows a pending pause until every registered Mac acknowledges it. An unreachable collector also suspends Bridge work until it answers.

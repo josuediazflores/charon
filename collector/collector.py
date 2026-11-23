@@ -26,6 +26,8 @@ draw it as "not wired", not as an error.
 Run:  python3 collector.py serve
 """
 
+from feature_control import FEATURES, FeatureControl, admit, feature_access
+
 import argparse
 import hashlib
 import hmac
@@ -4151,7 +4153,9 @@ class Collector:
         # looking for one conversation in all of it. A no-op on every start
         # after the first, and on a box that has never had a message on it.
         self.sources["messages"].migrate = self.messages_migrate
-        self.messages_migrate()
+        with admit("messages") as allowed:
+            if allowed:
+                self.messages_migrate()
 
     # -- persistence ---------------------------------------------------------
 
@@ -4191,9 +4195,11 @@ class Collector:
         last_save = 0.0
         while not self.stop.is_set():
             now = time.monotonic()
-            for src in self.sources.values():
+            for name, src in self.sources.items():
                 if now >= src.next_at:
-                    src.poll_once()
+                    with admit(name) as allowed:
+                        if allowed:
+                            src.poll_once()
             if now - last_save > 60:
                 self.save()
                 last_save = now
@@ -4202,7 +4208,11 @@ class Collector:
     # -- the payload ---------------------------------------------------------
 
     def telemetry(self):
-        sources = {name: src.snapshot() for name, src in self.sources.items()}
+        sources = {}
+        for name, src in self.sources.items():
+            with admit(name) as allowed:
+                if allowed:
+                    sources[name] = src.snapshot()
         counts = {k: 0 for k in WORST}
         for snap in sources.values():
             counts[snap["status"]] = counts.get(snap["status"], 0) + 1
@@ -4218,6 +4228,7 @@ class Collector:
                 "started_at": iso(self.started_at),
                 "uptime_s": int((datetime.now() - self.started_at).total_seconds()),
             },
+            "feature_access": feature_access(),
             "health": {"worst": worst, **counts},
             "sources": sources,
         }
@@ -9431,23 +9442,66 @@ def make_handler(collector, token):
             except ValueError:
                 return None, "body is not valid JSON"
 
-        def _cmo_routines(self, write=False):
-            from cmo_control import CmoControl
-            requested = None
-            if write:
-                doc, error = self._read_body(128)
-                if error or not isinstance(doc, dict) or (doc and
-                        (set(doc) != {"enabled"} or type(doc["enabled"]) is not bool)):
-                    return self._json(400, {"error": "Expected {} or a boolean enabled field."})
-                requested = doc.get("enabled")
+        def _feature_control(self, feature, bridge):
+            if not self.headers.get("Authorization", "").startswith("Bearer ") or not hmac.compare_digest(
+                    self.headers["Authorization"][7:], token):
+                self.close_connection = True
+                return self._deny()
+            doc, error = self._read_body(1024)
+            if error or not isinstance(doc, dict):
+                return self._json(400, {"error": "Expected a JSON object."})
+            control = FeatureControl(feature)
             try:
-                state = CmoControl().apply(requested)
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-                message = str(exc) if isinstance(exc, RuntimeError) else "Cannot verify CMO jobs. Check the Pi units and permissions."
+                if bridge:
+                    host, ack = doc.get("host"), doc.get("ack")
+                    if (not isinstance(host, str) or not 0 < len(host) <= 255 or
+                            (ack is not None and not isinstance(ack, str))):
+                        return self._json(400, {"error": "Invalid Bridge status."})
+                    state = control.bridge_state(host, ack)
+                else:
+                    if doc and (set(doc) != {"enabled"} or type(doc["enabled"]) is not bool):
+                        return self._json(400, {"error": "Expected {} or a boolean enabled field."})
+                    state = control.apply(doc.get("enabled"))
+            except (KeyError, TypeError, OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                message = str(exc) if isinstance(exc, RuntimeError) else "Cannot verify feature jobs. Check the Pi registration and permissions."
                 return self._json(503, {"error": message})
             return self._json(200, state)
 
+        def _dispatch(self, handler):
+            path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            parts = path.split("/")
+            name = parts[2] if len(parts) >= 3 and parts[1] == "v1" else ""
+            feature = name
+            if name == "sources" and len(parts) == 4:
+                feature = parts[3]
+            if feature not in FEATURES:
+                return handler()
+            if not self._authorized():
+                self.close_connection = True
+                return self._deny()
+            if self.command == "POST":
+                bridge = path == "/v1/messages/bridge-control"
+                if path == f"/v1/{feature}/routines" or bridge:
+                    return self._feature_control(feature, bridge)
+                # A send that already happened can still record its outcome.
+                if MESSAGES_REPORT_ROUTE.fullmatch(path):
+                    return handler()
+            with admit(feature) as allowed:
+                if allowed:
+                    return handler()
+            self.close_connection = True
+            return self._json(409, {"error": f"{feature} is paused."})
+
+        def do_GET(self):
+            return self._dispatch(self._get)
+
         def do_POST(self):
+            return self._dispatch(self._post)
+
+        def do_PUT(self):
+            return self._dispatch(self._put)
+
+        def _post(self):
             """The two curation routes, the ask route, and the mailbox's five.
             Everything else is still read-only.
 
@@ -9477,18 +9531,7 @@ def make_handler(collector, token):
                 self.close_connection = True
                 return self._deny()
 
-            if path == "/v1/cmo/routines":
-                if not self.headers.get("Authorization", "").startswith("Bearer ") or not hmac.compare_digest(
-                        self.headers["Authorization"][7:], token):
-                    self.close_connection = True
-                    return self._deny()
-                return self._cmo_routines(write=True)
-
             if path == ASK_ROUTE:
-                from cmo_control import STATE
-                if (STATE / "cmo-paused.json").exists():
-                    self.close_connection = True
-                    return self._json(409, {"error": "CMO routines are paused."})
                 return self._ask()
 
             # `new` before the thread pattern, because `new` is a legal slug.
@@ -10052,7 +10095,7 @@ def make_handler(collector, token):
 
         # -- the one write that is not JSON ----------------------------------
 
-        def do_PUT(self):
+        def _put(self):
             """The Bridge handing over one attachment's bytes, and nothing else.
 
             Every other write on this server is a small JSON document. This one
@@ -10190,7 +10233,7 @@ def make_handler(collector, token):
 
         # -- routes ----------------------------------------------------------
 
-        def do_GET(self):
+        def _get(self):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
             query = urllib.parse.parse_qs(parsed.query)

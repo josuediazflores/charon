@@ -59,6 +59,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let core = Core(paths: paths, log: log)
         let collector = Collector(base: base, token: token, dryRun: options.dryRun, log: log)
+        if let seconds = options.exitAfter {
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                await stop("--exit-after", drain: true)
+            }
+        }
+        var acknowledged: String?
+        repeat {
+            let control = "/v1/messages/bridge-control"
+            let host = JSONValue.string(core.host)
+            do {
+                let state = try await collector.post(control, .object(["host": host]))
+                guard let enabled = state["enabled"]?.boolValue else { throw Collector.Failure.malformed }
+                if enabled {
+                    acknowledged = nil
+                    if supervisor == nil {
+                        await startWorkers(paths: paths, core: core, collector: collector, log: log)
+                    }
+                } else {
+                    await pauseWorkers()
+                    if let generation = state["generation"]?.stringValue, acknowledged != generation {
+                        _ = try await collector.post(control, .object(["host": host, "ack": .string(generation)]))
+                        acknowledged = generation
+                    }
+                }
+            } catch {
+                await pauseWorkers()
+                log.warn("Messages paused until the collector confirms its state: \(error.redacted)")
+            }
+            if options.once { await stop("--once", drain: false) }
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+        } while !Task.isCancelled
+    }
+
+    private func pauseWorkers() async {
+        guard let supervisor else { return }
+        let running = tasks
+        for task in running { task.cancel() }
+        await supervisor.stop()
+        await backfill?.stop()
+        for task in running { await task.value }
+        tasks.removeAll()
+        self.supervisor = nil
+        watcher = nil
+        backfill = nil
+    }
+
+    private func startWorkers(paths: Paths, core: Core, collector: Collector, log: Log) async {
         let helper = Helper(paths: paths, log: log, dryRun: options.dryRun)
         let supervisor = RPCSupervisor(helper: helper, log: log)
         let watcher = Watcher(core: core, supervisor: supervisor,
@@ -107,16 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tasks.append(Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                await watcher.tick()
+                if !Task.isCancelled { await watcher.tick() }
             }
         })
-
-        if let seconds = options.exitAfter {
-            tasks.append(Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                await self?.stop("--exit-after", drain: true)
-            })
-        }
 
         // Last, and after the loops are up, because the person answering the
         // dialog may take a while and nothing here should wait on them.
@@ -154,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The directory was read under the old answer, so it is worth
             // reading again under the new one rather than waiting five
             // minutes for the console to learn everybody's name.
-            if await core.note(contacts: granted) {
+            if self.watcher === watcher, await core.note(contacts: granted) {
                 await watcher.contactsChanged()
             }
         }

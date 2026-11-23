@@ -208,6 +208,12 @@ actor RPCSession {
         input = nil
     }
 
+    func waitForExit() async {
+        while process?.isRunning == true {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
     // MARK: - the reader
 
     private func received(_ line: Data) {
@@ -310,6 +316,7 @@ actor RPCSupervisor {
     /// The child, or the attempt to make one, or the attempt to end one. One
     /// slot for all three, because "is there a helper" and "is somebody making
     /// one" have to be the same question or the answer races.
+    private var stopped = false
     private var live: Task<RPCSession, Error>?
 
     /// How many times one caller will look before giving up. It cannot spin:
@@ -326,6 +333,7 @@ actor RPCSupervisor {
     /// on the way through, every time.
     func session() async throws -> RPCSession {
         for _ in 0..<Self.rounds {
+            guard !stopped, !Task.isCancelled else { throw CancellationError() }
             guard let inFlight = live else {
                 // Nothing in the slot, and nothing between reading that and
                 // filling it. This is the single-flight.
@@ -359,12 +367,13 @@ actor RPCSupervisor {
     }
 
     func stop() async {
-        await end()
+        stopped = true
+        await end(waitForExit: true)
     }
 
     /// The kill, in the slot, so nothing starts a replacement over the top of
     /// a child that is still being ended.
-    private func end() async {
+    private func end(waitForExit: Bool = false) async {
         guard let inFlight = live else { return }
         let closing = Task<RPCSession, Error> {
             // Cancelled first so a spawn still waiting on a download gives up
@@ -373,7 +382,10 @@ actor RPCSupervisor {
             // in it -- so its session still comes back here to be shut down,
             // which is what keeps a kill from orphaning a process.
             inFlight.cancel()
-            if let session = try? await inFlight.value { await session.shutdown() }
+            if let session = try? await inFlight.value {
+                await session.shutdown()
+                if waitForExit { await session.waitForExit() }
+            }
             throw RPCError.helperTerminated
         }
         live = closing

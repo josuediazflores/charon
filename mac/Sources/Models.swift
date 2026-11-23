@@ -115,6 +115,7 @@ extension SourceEnvelope: Decodable {
 /// does not send it, and a strict `Decodable` would throw the whole payload
 /// away over a source this app can perfectly well draw as absent.
 struct TelemetryPayload: Equatable {
+    var featureAccess: [String: Bool]?
     var schema: Int?
     var serverTime: String?
     var collector: CollectorInfo?
@@ -157,13 +158,14 @@ struct TelemetryPayload: Equatable {
 }
 
 extension TelemetryPayload: Decodable {
-    private enum K: String, CodingKey { case schema, serverTime, collector, health, sources }
+    private enum K: String, CodingKey { case schema, serverTime, collector, health, sources, featureAccess }
     private enum S: String, CodingKey {
         case camera, pihole, nodes, commits, healthchecks, cmo, mail, messages
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: K.self)
+        featureAccess = try? c.decodeIfPresent([String: Bool].self, forKey: .featureAccess)
         schema = try? c.decodeIfPresent(Int.self, forKey: .schema)
         serverTime = try? c.decodeIfPresent(String.self, forKey: .serverTime)
         collector = try? c.decodeIfPresent(CollectorInfo.self, forKey: .collector)
