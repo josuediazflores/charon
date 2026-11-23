@@ -79,6 +79,8 @@ final class ConsoleSettings {
         ConsoleNav.items.filter { isTabAvailable($0.id) }
     }
 
+    var sidebarCollapsed: Bool { didSet { write("sidebarCollapsed", sidebarCollapsed) } }
+
     /// The rail steps aside while a mail message is open. On a narrow pane 200
     /// points of navigation is half the viewport; on a wide one it is 200
     /// points nobody misses, so the answer is a preference rather than a rule.
@@ -250,6 +252,7 @@ final class ConsoleSettings {
     private init() {
         let disabled = UserDefaults.standard.stringArray(forKey: "disabledFeatures") ?? []
         disabledFeatures = Set(disabled.compactMap(ConsoleFeature.init(rawValue:)))
+        sidebarCollapsed = ConsoleSettings.flag("sidebarCollapsed", default: false)
         railCollapse = ConsoleSettings.flag("railCollapse", default: true)
         rowNote = ConsoleSettings.flag("rowNote", default: true)
         summaryOpen = ConsoleSettings.flag("summaryOpen", default: true)

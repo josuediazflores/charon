@@ -8,9 +8,7 @@ import SwiftUI
 
    No fills, no edge bars. One column of gutter, then the label.
 
-   **Collapsing is composition, not a width.** The shell hands its rail slot
-   either this or `RailStub`; nothing here hides itself, which is what makes
-   "the other six tabs are untouched" checkable rather than hopeful.
+   The shell swaps the sidebar for RailStub when collapsed.
 */
 
 /// What stands in a rail row's icon slot.
@@ -231,6 +229,7 @@ struct RailStub: View {
         .focusEffectDisabled()
         .onHover { hovering = $0 }
         .overlay(alignment: .trailing) { Rectangle().fill(HT.line).frame(width: 1) }
-        .accessibilityLabel(Text("Show the rail"))
+        .accessibilityLabel(Text("Show sidebar"))
+        .help("Show sidebar (⌥⌘S)")
     }
 }

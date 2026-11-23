@@ -26,16 +26,8 @@ import SwiftUI
    against the rail's own list, and falls back to Overview when that tab has
    since been cut.
 
-   *Whether the rail is in the way.* There is one place in this console where
-   200 points of navigation is worth less than the ground it stands on: the mail
-   tab with a message open. So the rail steps aside for exactly as long as a
-   message is open and comes back on its own the moment one is not. The one
-   thing the selection cannot say is that he pushed the rail back out himself,
-   on this message, without closing it -- so that is held, and held as **the
-   place it was decided in** rather than as a boolean. It stops applying the
-   moment the route moves and no effect anywhere has to remember to clear it.
-   Collapsing is composition: the slot is handed a different element, so the
-   claim that the other six tabs are untouched is checkable rather than hopeful.
+   *Whether the sidebar is visible.* The Mac remembers the manual choice.
+   Mail can temporarily collapse it while a message is open.
 
    *When the payload guard applies.* Settings is answered above it, because a
    page made entirely of local preferences has nothing for a payload to add --
@@ -65,9 +57,8 @@ struct ConsoleShellView: View {
     @State private var watchSeen = SeenMarks("cmo-watch-seen")
     @State private var docsSeen = SeenMarks("cmo-docs-seen")
     @State private var tab: String = ConsoleSettings.shared.landing
-    /// Where the rail was pinned back out. A place string, never a flag: it
-    /// expires by comparison the moment `here` changes.
-    @State private var pinned: String?
+    /// A reader can reveal the sidebar for its own message.
+    @State private var expandedMailMessage: String?
     /// Bumped by ⌘K. The command field watches it and puts the caret in.
     @State private var commandFocus = 0
     /// The console pane's own width, for the padding step at 720. Measured on
@@ -87,15 +78,22 @@ struct ConsoleShellView: View {
 
     private var feedDown: Bool { model.feedDown }
 
-    /// The address, in one string. `tab/key` rather than two fields, so a pin
-    /// taken on one message cannot outlive a walk to the next.
-    private var here: String { "\(tab)/\(model.selection ?? "")" }
-
-    private var inTheWay: Bool {
-        settings.railCollapse && tab == "mail" && model.selection != nil
+    private var autoCollapseMessage: String? {
+        settings.railCollapse && tab == "mail" ? model.selection : nil
     }
 
-    private var collapsed: Bool { inTheWay && pinned != here }
+    private var collapsed: Bool {
+        if let message = autoCollapseMessage { return expandedMailMessage != message }
+        return settings.sidebarCollapsed
+    }
+
+    private func toggleSidebar() {
+        if let message = autoCollapseMessage {
+            expandedMailMessage = collapsed ? message : nil
+        } else {
+            settings.sidebarCollapsed.toggle()
+        }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -104,7 +102,7 @@ struct ConsoleShellView: View {
             // payload has landed: the rail appearing when the first poll
             // returns would be a layout jump between two pictures of one route.
             if collapsed {
-                RailStub { pinned = here }
+                RailStub(onShow: toggleSidebar)
             } else {
                 rail
             }
@@ -153,6 +151,7 @@ struct ConsoleShellView: View {
         // The Window menu and the title bar read this. One destination, one
         // name, and no second opinion about where you are.
         .navigationTitle(ConsoleNav.label(tab))
+        .onChange(of: autoCollapseMessage) { _, _ in expandedMailMessage = nil }
         .onChange(of: settings.isEnabled(.messages)) { _, enabled in
             if !enabled { model.cancelHeldMessages() }
         }
@@ -207,16 +206,10 @@ struct ConsoleShellView: View {
     private var rail: some View {
         SidebarView(
             name: "Halftone",
-            // The way to put it away again, once he has pulled it out somewhere
-            // it would otherwise have left. Only drawn there: on the other six
-            // tabs the rail is not going anywhere, and a control that hid it
-            // would be a new preference to get wrong rather than a place to
-            // read.
-            brandAside: inTheWay
-                ? AnyView(IconButton(icon: "<", label: "Hide the rail", size: .sm) {
-                    pinned = nil
-                })
-                : nil,
+            brandAside: AnyView(
+                IconButton(icon: "<", label: "Hide sidebar", bordered: true, action: toggleSidebar)
+                    .help("Hide sidebar (⌥⌘S)")
+            ),
             items: settings.availableTabs,
             active: tab,
             onSelect: { tab = $0 },
@@ -289,6 +282,9 @@ struct ConsoleShellView: View {
     /// for each of these is the rail row it selects.
     private var shortcuts: some View {
         ZStack {
+            Button("Toggle sidebar", action: toggleSidebar)
+                .keyboardShortcut("s", modifiers: [.option, .command])
+
             Button("Search nodes, commits") { commandFocus &+= 1 }
                 .keyboardShortcut("k", modifiers: .command)
 
@@ -491,7 +487,49 @@ private struct WindowChrome: NSViewRepresentable {
         window.titlebarSeparatorStyle = .none
         window.isOpaque = false
         window.backgroundColor = .clear
+        styleWindowButtons(in: window)
         mount(in: window)?.wash(ground, of: family, picture: picture)
+    }
+
+    /// Clip only the painted lights. AppKit still owns the full button hit areas,
+    /// hover symbols, accessibility actions and window arrangement menu.
+    private func styleWindowButtons(in window: NSWindow) {
+        let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let maskName = "CharonPixelWindowLight"
+        for kind in kinds {
+            guard let button = window.standardWindowButton(kind) else { continue }
+            button.wantsLayer = true
+            guard let layer = button.layer, !layer.bounds.isEmpty else { continue }
+            let scale = window.backingScaleFactor
+            if let installed = layer.mask {
+                guard installed.name == maskName else { continue }
+                if installed.frame == layer.bounds && installed.contentsScale == scale { continue }
+            }
+
+            // Inscribe the stepped circle in the native light. Snap each edge to
+            // the backing grid so the shape keeps its size on 1x and 2x screens.
+            let diameter = min(12, layer.bounds.width, layer.bounds.height)
+            let cell = diameter / 7
+            let originX = (layer.bounds.width - diameter) / 2
+            let originY = (layer.bounds.height - diameter) / 2
+            func snap(_ point: CGFloat) -> CGFloat { (point * scale).rounded() / scale }
+
+            let path = CGMutablePath()
+            for (row, inset) in [2, 1, 0, 0, 0, 1, 2].enumerated() {
+                let left = snap(originX + CGFloat(inset) * cell)
+                let right = snap(originX + CGFloat(7 - inset) * cell)
+                let bottom = snap(originY + CGFloat(row) * cell)
+                let top = snap(originY + CGFloat(row + 1) * cell)
+                path.addRect(CGRect(x: left, y: bottom, width: right - left, height: top - bottom))
+            }
+
+            let mask = CAShapeLayer()
+            mask.name = maskName
+            mask.frame = layer.bounds
+            mask.contentsScale = scale
+            mask.path = path
+            layer.mask = mask
+        }
     }
 
     /// Put the backdrop at the very back of the frame view, once, and hand it

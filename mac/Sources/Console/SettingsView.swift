@@ -161,8 +161,8 @@ struct SettingsView: View {
                           on: settings.railCollapse) {
                     settings.railCollapse.toggle()
                 }
-                SettingsNote("The HALFTONE rail steps aside when a message opens, and comes "
-                             + "back when it closes. Off, the rail stays put everywhere.")
+                SettingsNote("Hide the sidebar when a message opens. Closing the reader restores "
+                             + "your usual sidebar layout.")
 
                 ToggleRow(label: "show the ai line under each row", on: settings.rowNote) {
                     settings.rowNote.toggle()

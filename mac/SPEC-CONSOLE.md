@@ -87,14 +87,12 @@ Native mapping: sidebar selection + per-tab reader state; preserve the
 Rail: Sidebar name "Halftone" mark ◧, one section, 7 items (:411-445). Footer
 Panel dense with two DotLeaders: `sources` = "<ok>/<total|—>" from
 payload.health; `last sync` = dur(now−fetchedAt) or —, tone caution when
-feedDown (:422-431, :341-346). Collapse is COMPOSITION (:374-378): collapsed →
-swap rail for RailStub. Conditions (:399-409): inTheWay = railCollapse &&
-tab==mail && mailKey!=nil; here = "tab/mailKey"; collapsed = inTheWay &&
-pinned != here. pinned is a PLACE STRING (auto-expires on route change), not a
-bool. RailStub (:321-334, app.css:377-423): 28px wide button, full height,
-border-right line, cap ◧ 48px tall bottom-ruled signal-colored, cue ">"
-16px below in signal; hover surface-3/ink-bright. When inTheWay, sidebar
-brandAside gets an IconButton "<" size sm "Hide the rail" → pinned=nil.
+feedDown (:422-431, :341-346). The sidebar starts expanded. The `<` button beside the
+brand or ⌥⌘S collapses it to a 28pt strip. Click the strip or press ⌥⌘S
+to expand it. The Mac remembers the choice across tabs and launches.
+With Mail's automatic collapse enabled, opening a message temporarily shows
+the strip. Expanding it applies to that message. Leaving the reader restores
+the saved sidebar layout.
 
 TopBar (:447-464): CommandField placeholder "Search nodes, commits" (inert,
 ⌘K focuses); actions: DEMO chip (br-yellow) when demo; IconButton ⟳ bordered =
