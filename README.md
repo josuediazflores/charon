@@ -1,32 +1,18 @@
 # Charon
 
-Charon is a personal console for one person and their own machines. A Raspberry
-Pi 5 sitting on a shelf collects telemetry, mirrors a mailbox, runs model
-sessions and holds every piece of state. A native macOS app is the face you look
-at. The two talk over a private network with a bearer token, and nothing here is
-exposed to the internet.
+Charon is a native macOS dashboard for your Raspberry Pi. Check which machines
+are online, read mail and messages, or ask Jarvis to look into something while
+you keep talking. The Pi collects the data and runs the model sessions. The Mac
+connects over your private network with a bearer token.
 
-![The Overview tab](docs/screenshots/1-overview.png)
+![Charon Overview in Demo mode with Pi-hole, node health and collector uptime widgets](docs/screenshots/1-overview.png)
 
-What it does, concretely:
+**Try it on your Mac.** On macOS 15 or later, you can build Charon with Xcode
+and XcodeGen and explore the dashboard with fictional data. Demo mode works
+without a Pi, mailbox or token. [Build the Mac app](#3-the-mac-app).
 
-- **Telemetry.** Eight sources polled on their own intervals, each keeping its
-  last good answer with an honest age beside it: a camera monitor, Pi-hole, node
-  reachability, GitHub commits, daily health checks of the Pi itself, and the
-  three feature stores below.
-- **Mail.** A mailbox mirrored to files on the Pi, classified by a model session
-  that has no network of its own, with reply drafts you can edit. A reply leaves
-  only when a human clicks SEND twice.
-- **Messages.** iMessage conversations you explicitly allow, pushed up from the
-  Mac by a small background app, classified and drafted on the Pi, sent back
-  through the Mac.
-- **Chat and Jarvis.** Model sessions that run on the Pi, in their own working
-  directories, under default-deny permission allowlists. They answer questions
-  about the box they are running on. One of them can file background jobs.
-
-This is a working system that was scrubbed of one household's details and
-published. Every address, path, bundle id, domain and person in it is now an
-example. See **Making it yours** below for the full list of what to change.
+For a live installation, start with [setup](#setup-in-order). The addresses,
+accounts and people in this public repo are examples. [See what to customize](#making-it-yours).
 
 ## What is in this repo
 
@@ -35,6 +21,9 @@ example. See **Making it yours** below for the full list of what to change.
 | `mac/` | Two macOS apps from one xcodegen project: **Charon.app**, the SwiftUI console, and **Charon Bridge.app**, a windowless login item that carries iMessage | Your Mac, macOS 15+ (the Bridge, 14+) |
 | `collector/` | The telemetry collector, the only listening socket in the system, plus the chat and Jarvis session runners and their permission environments | The Pi, Python 3.11, stdlib only |
 | `mail/` | The mail and messages workers: an IMAP poller, a triage worker, an actions worker, a messages worker, their prompts, their systemd units, and an optional inbound mail path | The Pi, Python 3.11, stdlib only |
+
+The [Jarvis Daily Brief prototype](prototypes/jarvis/README.md) is a separate
+offline browser demo with a narrated briefing and sample reports.
 
 Component documentation lives next to the code: `collector/README.md`,
 `collector/JARVIS-CONTRACT.md`, `collector/chat-env/README.md`, `mail/MESSAGES.md`,
@@ -47,77 +36,77 @@ on a wire format, and you can run any one of them without the other two.
 
 ## The console
 
-Eight destinations on one window, `⌘1` through `⌘8`. Every shot below is the app
-in **Demo mode**, which is what you get on first launch before you point it at a
-Pi: the people, companies and figures in them are the invented cast described
-under **Making it yours**, and none of the panels is reading a real machine.
+The Focus layout uses a solid graphite background, serif headings and a
+collapsible sidebar. Use `⌘1` through `⌘8` to switch between the main sections.
+The screenshots in this guide are from the public Mac app in Demo mode.
 
-**Hardware.** Every node the collector knows about, with the two that are not
-answering said once above the table and again inside it. The camera panel fetches
-its still with a bearer header rather than linking it, and whether there is a
-feed at all is read from the JSON, never inferred from whether an image happened
-to load.
+### Overview
 
-![The Hardware tab](docs/screenshots/2-hardware.png)
+The first screen shows collector uptime, node reachability and Pi-hole activity.
+Select **Edit Overview** to move or resize cards. Select **Add Widget** for a
+preset or a custom card, then **Save**. Demo has its own layout, and each live
+collector has its own. [Widget setup guide](mac/Resources/WidgetHelp/AGENTS.md).
 
-**CMO.** A briefing produced by a scheduled model session on the Pi, with its run
-record, its pipeline and its watchlist beside it. The row marked `×` is one you
-dismissed: it loses its priority pips entirely rather than dimming them, because
-the ranking was a claim about what to do next and you have answered it.
+### Jarvis
 
-![The CMO tab](docs/screenshots/3-cmo.png)
+Open **Jarvis → Conversation** for today's chat. On a fresh day, **Catch me up**
+prepares a question about overnight work, **Revisit a day** opens history, and
+**Hand off a task** switches the composer to a background job. You can also
+type your own question and send it.
 
-**Mail.** The mirrored mailbox. Line three of each row is the machine's reading:
-the tags it chose, whether a reply is queued or sent, and whether it has been
-triaged at all. A send that failed is a mark on line one instead, because
-nothing above the list counts one.
+![Jarvis Conversation with its amber orb, message composer and three starter actions](docs/screenshots/7-jarvis.png)
 
-![The Mail tab](docs/screenshots/4-mail.png)
+During a conversation, choose **As job** to hand longer work to the Pi while
+you continue chatting. **History** lets you read earlier days.
 
-Opening a message collapses the rail and puts the sender's own words on the
-page. The summary above them is labelled with the model that wrote it and says
-plainly that it is not the sender's words. `Reply` and `AI draft` both end at a
-draft: the only thing that sends is your second click on SEND.
+Open **Jarvis → Overnight tasks** to see what is queued, running or finished.
+Select a run to read its result. With a collector that supports archived
+reports, you can follow sources, read Markdown notes, preview Word documents
+and PDFs, or select **Save a copy**. Older collectors show recent jobs and
+their result text. [Overnight reader routes](collector/JARVIS-CONTRACT.md#overnight-report-reader).
 
-![A message open in the reader](docs/screenshots/4b-mail-reader.png)
+![Overnight tasks listing sample runs and their status](docs/screenshots/7b-overnight.png)
 
-**Messages.** iMessage conversations you explicitly allowlisted, carried up from
-the Mac by the Bridge. Chats you did not allowlist are not on this list because
-they were never read.
+<details>
+<summary>Tour Hardware, CMO, Mail, Messages, Chat and Settings</summary>
 
-![The Messages tab](docs/screenshots/5-messages.png)
+**Hardware** shows the nodes the collector tracks, which ones are reachable,
+and the latest camera still when a feed is available.
 
-The pinned thread at the top is the agent itself, and it is the clearest picture
-of the consent model in the whole app: asked to send, it drafts, queues, and
-then says it does not send on its own.
+![Hardware showing tracked nodes, reachability and a demo camera feed](docs/screenshots/2-hardware.png)
 
-![The agent thread in Messages](docs/screenshots/5b-messages-thread.png)
+**CMO** puts the daily briefing beside its run record, pipeline and watchlist.
+Open a briefing item to read it or dismiss it when you are done.
 
-**Chat.** A model session running on the Pi, in its own working directory under
-a default-deny allowlist. It reads the box and the web and changes nothing but
-its own memory.
+![Daily CMO briefing with ranked items and run details](docs/screenshots/3-cmo.png)
 
-![The Chat tab](docs/screenshots/6-chat.png)
+**Mail** shows your mirrored inbox with triage tags and draft status. Open a
+message to read the sender's words alongside a labeled model summary. You can
+edit a reply or an AI draft before confirming the send.
 
-**Jarvis.** One conversation per day rather than one per task, with long work
-running as jobs in a second lane that never blocks the conversation. The orb is
-a 1-bit dither and its state is the session's state.
+![Mail inbox with triage tags and draft indicators](docs/screenshots/4-mail.png)
 
-In the Mac sidebar, expand **Jarvis** and select **Overnight tasks**. In Live
-mode this lists saved jobs from your connected Pi. Open a run to read its
-result, follow a source, or open an archived Markdown note. Word documents
-and PDFs open in Quick Look. **Save a copy** keeps a file on your Mac.
+![An open sample email showing the sender and a separate model summary](docs/screenshots/4b-mail-reader.png)
 
-With an older collector, Charon reads its recent job list and the result text
-it already provides. Full reports, older pages and archived files use the
-[overnight reader routes](collector/JARVIS-CONTRACT.md#overnight-report-reader).
+**Messages** shows the iMessage conversations you allow Charon Bridge to
+forward. The pinned Charon thread can prepare a reply for you to review in the
+destination conversation.
 
-![The Jarvis tab](docs/screenshots/7-jarvis.png)
+![Messages showing the pinned Charon thread and allowlisted demo chats](docs/screenshots/5-messages.png)
 
-**Settings.** Every row carries its own reasoning, including the rows that are
-fixed and explain why they are not a choice.
+![The pinned Charon thread explaining where to review a drafted reply](docs/screenshots/5b-messages-thread.png)
 
-![The Settings tab](docs/screenshots/8-settings.png)
+**Chat** keeps separate sessions on the Pi. Start a session for a question or
+open the session list to pick up an earlier thread.
+
+![Chat with a new session composer and a button to open saved sessions](docs/screenshots/6-chat.png)
+
+**Settings** is where you choose the features you use, adjust appearance and
+open the connection settings for your Pi.
+
+![Settings with feature toggles and mail reading preferences](docs/screenshots/8-settings.png)
+
+</details>
 
 ## Security and consent
 
@@ -140,11 +129,9 @@ Those two commands are the whole proof, they take one second, and they cannot
 quietly rot. `mail/MESSAGES.md` carries the same pair for the messages worker.
 
 **Sending is a human click, twice.** The app's SEND control is disabled until
-there is a reply address and non-empty text. The first click arms nothing on the
-network: it opens a bordered strip naming the recipient, with the only
-filled-cyan control in the entire app on it. The second click posts. Retrying a
-failure always mints a new record and never re-posts an old one, because the
-failure mode of an automatic retry is sending the same message twice.
+there is a reply address and non-empty text. The first click shows the recipient.
+Clicking **Confirm send** submits the reply. Retrying a failure creates a new
+record so the original send stays in the history.
 
 **The recipient is computed on the Pi, never supplied.** `POST /v1/mail/send`
 takes a message key and a body, and nothing else. The address comes off the
@@ -378,6 +365,10 @@ should fail loudly rather than silently grant a parent directory.
 
 ### 3. The Mac app
 
+Install Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Keep the
+checkout outside iCloud Drive, since sync metadata on the built app can prevent
+code signing. Run these commands from the root of the checkout.
+
 ```sh
 cd mac
 xcodegen generate
@@ -386,14 +377,13 @@ xcodebuild -project HalftoneMail.xcodeproj -scheme HalftoneMail \
 open DerivedData/Build/Products/Debug/Charon.app
 ```
 
-It opens in **Demo mode** against built-in fixtures, so you can click through
-every tab before any Pi exists. The fixtures are invented people at invented
-companies; see **Making it yours**.
+On first launch, Charon opens in **Demo mode**. Try **Edit Overview** to arrange
+your dashboard, then open **Jarvis → Conversation** from the sidebar.
 
-To point it at the Pi, either open the gear and fill in the base URL and token,
-or run `scripts/connect-live.sh`, which pulls the token off the Pi over ssh,
-writes it to the login Keychain without printing it, checks that the collector
-accepts it, and relaunches the app in live mode. The token is stored in the
+To connect to your Pi, open **Settings → Connection** and enter the base URL
+and token. You can also run `scripts/connect-live.sh` to fetch the token from
+the Pi over SSH. The script saves it to the login Keychain, checks the
+connection and relaunches Charon in Live mode. The token is stored in the
 Keychain under `com.example.charon.collector` and never in preferences.
 
 The project signs ad-hoc (`CODE_SIGN_IDENTITY: "-"`), because this tree carries
