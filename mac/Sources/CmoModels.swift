@@ -1162,7 +1162,7 @@ struct JarvisJob: Equatable, Identifiable {
 
 extension JarvisJob: Decodable {
     private enum K: String, CodingKey {
-        case id, title, text, state, createdAt, updatedAt, result, error
+        case id, title, text, state, status, createdAt, updatedAt, result, error
         case tools, model, elapsedS
     }
     init(from decoder: Decoder) throws {
@@ -1170,7 +1170,8 @@ extension JarvisJob: Decodable {
         id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
-        state = (try? c.decode(JarvisJobState.self, forKey: .state)) ?? .queued
+        state = (try? c.decode(JarvisJobState.self, forKey: .state))
+            ?? (try? c.decode(JarvisJobState.self, forKey: .status)) ?? .queued
         createdAt = (try? c.decodeIfPresent(String.self, forKey: .createdAt)) ?? ""
         updatedAt = (try? c.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
         result = try? c.decodeIfPresent(String.self, forKey: .result)

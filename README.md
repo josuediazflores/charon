@@ -103,6 +103,15 @@ its own memory.
 running as jobs in a second lane that never blocks the conversation. The orb is
 a 1-bit dither and its state is the session's state.
 
+In the Mac sidebar, expand **Jarvis** and select **Overnight tasks**. In Live
+mode this lists saved jobs from your connected Pi. Open a run to read its
+result, follow a source, or open an archived Markdown note. Word documents
+and PDFs open in Quick Look. **Save a copy** keeps a file on your Mac.
+
+With an older collector, Charon reads its recent job list and the result text
+it already provides. Full reports, older pages and archived files use the
+[overnight reader routes](collector/JARVIS-CONTRACT.md#overnight-report-reader).
+
 ![The Jarvis tab](docs/screenshots/7-jarvis.png)
 
 **Settings.** Every row carries its own reasoning, including the rows that are

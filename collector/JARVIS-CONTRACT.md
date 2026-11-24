@@ -140,10 +140,32 @@ same contract `/v1/chat` already keeps.
 | `GET /v1/jarvis/days` | `{"days": [DaySummary]}`, newest first, capped at 60 |
 | `GET /v1/jarvis/day/<YYYY-MM-DD>` | one day record, `404` if none |
 | `GET /v1/jarvis/jobs` | `{"jobs": [Job]}`, newest first, capped at 50 |
+| `GET /v1/jarvis/runs` | `{"runs": [RunSummary], "next_cursor": string or null}` |
+| `GET /v1/jarvis/runs/<job-id>` | Full run detail, including the saved Markdown result |
+| `GET /v1/jarvis/runs/<job-id>/files/<file-id>` | The referenced document bytes |
 
 `DaySummary` is `{day, updated_at, turn_count, job_count, status, queued, model,
 context: {pct, tokens}, preview}` where `preview` is the first line of the
 newest assistant `say` turn.
+
+### Overnight report reader
+
+The first reader uses each existing job record as one run. A run summary contains
+`id`, `title`, `status`, `created_at` and `updated_at`. Follow a non-null
+`next_cursor` with `?before=<cursor>` to read the next page in descending job-ID
+order. Detail adds `request`, `markdown`, nullable `error`, `sources` and `files`.
+Markdown contains the whole saved result, including any truncation the runner
+already recorded. Source entries contain a `label` and HTTP(S) `url` found in
+the report. They are references from the saved text.
+
+The legacy runner has no attachment manifest. A producer can preserve a run’s
+deliverables under `$BASE/jarvis/runs/<job-id>/files/`, keeping the relative paths
+used by the report. Each regular supported document in that folder appears with
+its opaque `id`, display `label` and report-relative `path`. Markdown, text, CSV,
+JSON, PDF, DOCX, JPEG and PNG are supported. Keep this folder specific to one run.
+An old run with no archived deliverables returns an empty file list. Absolute
+paths printed by a job do not grant access to files elsewhere on the Pi. These
+routes never create directories, queue jobs or migrate old records.
 
 ### Writes
 

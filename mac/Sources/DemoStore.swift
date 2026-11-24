@@ -400,6 +400,16 @@ final class DemoStore: MailStore {
     func jarvisToday() async throws -> JarvisDay? { jarvis.todayRecord() }
     func jarvisDays() async -> [JarvisDaySummary]? { jarvis.daySummaries() }
     func jarvisDay(_ day: String) async throws -> JarvisDay? { jarvis.day(day) }
+    func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
+        OvernightRunPage(runs: jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
+    }
+
+    func overnightRun(id: String) async throws -> OvernightRun? {
+        jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
+    }
+
+    func overnightFile(run: String, file: String) async throws -> URL? { nil }
+
     func jarvisJobs() async -> [JarvisJob]? { jarvis.jobList() }
     func jarvisSay(text: String) async -> WriteResult { jarvis.say(text) }
     func jarvisStop() async -> WriteResult { jarvis.stop() }

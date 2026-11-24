@@ -313,6 +313,8 @@ struct ConsoleShellView: View {
             console { SettingsView(model: model) }
         } else if tab == "overview" {
             console { overview }
+        } else if tab == ConsoleNav.overnight.id {
+            OvernightTasksView(model: model)
         } else if model.payload == nil {
             console { connecting }
         } else if tab == "mail" {

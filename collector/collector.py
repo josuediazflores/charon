@@ -27,6 +27,7 @@ Run:  python3 collector.py serve
 """
 
 from feature_control import FEATURES, FeatureControl, admit, feature_access
+import jarvis_runs
 
 import argparse
 import hashlib
@@ -8772,6 +8773,9 @@ CHAT_ACTION_ROUTE = re.compile(
 JARVIS_TODAY_ROUTE = "/v1/jarvis/today"
 JARVIS_DAYS_ROUTE = "/v1/jarvis/days"
 JARVIS_JOBS_ROUTE = "/v1/jarvis/jobs"
+JARVIS_RUNS_ROUTE = "/v1/jarvis/runs"
+JARVIS_RUN_ROUTE = re.compile(JARVIS_RUNS_ROUTE + "/(" + jarvis_runs.JOB_ID.pattern + ")"
+                              + r"(?:/files/([a-f0-9]{64}))?")
 JARVIS_DAY_ROUTE = re.compile(r"/v1/jarvis/day/(\d{4}-\d{2}-\d{2})")
 
 JARVIS_SAY_ROUTE = "/v1/jarvis/say"
@@ -9494,6 +9498,43 @@ def make_handler(collector, token):
 
         def do_GET(self):
             return self._dispatch(self._get)
+
+        def _jarvis_runs(self, path, query):
+            root = collector.jarvis_dir()
+            if not root:
+                return self._json(503, {"error": "chat.base_dir is unset"})
+            queued = collector.jarvis_job_is_queued
+            try:
+                if path == JARVIS_RUNS_ROUTE:
+                    page = jarvis_runs.list_runs(root, queued, (query.get("before") or [None])[0],
+                                                 JARVIS_JOBS_MAX)
+                    return self._json(200, page)
+                match = JARVIS_RUN_ROUTE.fullmatch(path)
+                if not match:
+                    return self._json(404, {"error": "Unknown run route"})
+                jid, file_id = match.groups()
+                if file_id is None:
+                    return self._json(200, jarvis_runs.detail(root, queued, jid))
+                handle, name, ctype = jarvis_runs.open_file(root, jid, file_id)
+            except jarvis_runs.RunError as exc:
+                return self._json(exc.code, {"error": str(exc)})
+            except (FileNotFoundError, NotADirectoryError):
+                return self._json(404, {"error": "Run or file unavailable"})
+            except OSError:
+                return self._json(500, {"error": "Cannot read the run archive"})
+            with handle:
+                remaining = os.fstat(handle.fileno()).st_size
+                self._headers(200, ctype, remaining, {
+                    "Cache-Control": "no-store",
+                    "Content-Disposition": "attachment; filename*=UTF-8''" + urllib.parse.quote(name, safe=""),
+                })
+                while remaining:
+                    chunk = handle.read(min(remaining, 256 * 1024))
+                    if not chunk:
+                        self.close_connection = True
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
 
         def do_POST(self):
             return self._dispatch(self._post)
@@ -10371,6 +10412,9 @@ def make_handler(collector, token):
 
             if path == JARVIS_JOBS_ROUTE:
                 return self._json(200, {"jobs": collector.jarvis_jobs()})
+
+            if path == JARVIS_RUNS_ROUTE or path.startswith(JARVIS_RUNS_ROUTE + "/"):
+                return self._jarvis_runs(path, query)
 
             # One past day, whole. 404 rather than an empty record when there is
             # none, unlike the today route above -- see `Collector.jarvis_day`.

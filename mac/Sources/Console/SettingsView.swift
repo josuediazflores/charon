@@ -491,8 +491,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ChoiceRow(label: "open the console on",
                           value: ConsoleNav.label(settings.landing),
-                          options: settings.availableTabs.map(\.label)) { picked in
-                    if let item = settings.availableTabs.first(where: { $0.label == picked }) {
+                          options: settings.landingOptions.map(\.label)) { picked in
+                    if let item = settings.landingOptions.first(where: { $0.label == picked }) {
                         settings.landingTab = item.id
                     }
                 }

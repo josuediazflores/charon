@@ -71,12 +71,17 @@ final class ConsoleSettings {
     }
 
     func isTabAvailable(_ id: String) -> Bool {
+        if id == ConsoleNav.overnight.id { return isEnabled(.jarvis) }
         if let feature = ConsoleFeature(rawValue: id) { return isEnabled(feature) }
         return ConsoleNav.ids.contains(id)
     }
 
     var availableTabs: [SidebarItemSpec] {
         ConsoleNav.items.filter { isTabAvailable($0.id) }
+    }
+
+    var landingOptions: [SidebarItemSpec] {
+        ConsoleNav.destinations.filter { isTabAvailable($0.id) }
     }
 
     var sidebarCollapsed: Bool { didSet { write("sidebarCollapsed", sidebarCollapsed) } }

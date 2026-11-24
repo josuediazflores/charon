@@ -59,14 +59,17 @@ enum ConsoleNav {
         SidebarItemSpec(id: "settings", icon: .text("⌘"), label: "Settings"),
     ]
 
-    static let ids: Set<String> = Set(items.map(\.id))
+    static let overnight = SidebarItemSpec(id: "jarvis-overnight", icon: .text(""), label: "Overnight tasks")
+    static let destinations = items.flatMap { $0.id == "jarvis" ? [$0, overnight] : [$0] }
+    static let ids: Set<String> = Set(destinations.map(\.id))
 
     static func label(_ id: String) -> String {
-        items.first { $0.id == id }?.label ?? "Overview"
+        destinations.first { $0.id == id }?.label ?? "Overview"
     }
 }
 
 struct SidebarView: View {
+    @AppStorage("jarvisSidebarExpanded") private var jarvisExpanded = true
     var name: String = "Halftone"
     /// Right side of the brand row, conventionally the hide-the-rail control.
     var brandAside: AnyView? = nil
@@ -96,8 +99,22 @@ struct SidebarView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(items) { item in
-                        SidebarRow(item: item, active: item.id == active) {
-                            onSelect(item.id)
+                        if item.id == "jarvis" {
+                            let sectionActive = active == item.id || active == ConsoleNav.overnight.id
+                            SidebarRow(item: item, active: sectionActive && !jarvisExpanded,
+                                       expanded: jarvisExpanded) {
+                                jarvisExpanded.toggle()
+                            }
+                            if jarvisExpanded {
+                                SidebarRow(item: .init(id: item.id, icon: .text(""), label: "Daily Brief"),
+                                           active: active == item.id, nested: true) { onSelect(item.id) }
+                                SidebarRow(item: ConsoleNav.overnight, active: active == ConsoleNav.overnight.id,
+                                           nested: true) { onSelect(ConsoleNav.overnight.id) }
+                            }
+                        } else {
+                            SidebarRow(item: item, active: item.id == active) {
+                                onSelect(item.id)
+                            }
                         }
                     }
                 }
@@ -122,12 +139,14 @@ struct SidebarView: View {
 private struct SidebarRow: View {
     var item: SidebarItemSpec
     var active: Bool
+    var expanded: Bool? = nil
+    var nested = false
     var select: () -> Void
 
     @State private var hovering = false
 
     private func ink(_ down: Bool) -> Color {
-        if active { return HT.void }
+        if active { return nested ? HT.inkBright : HT.void }
         return (hovering || down) ? HT.inkBright : HT.inkMid
     }
 
@@ -136,6 +155,7 @@ private struct SidebarRow: View {
     /// ground-coloured type would be a row that vanished for as long as it was
     /// being clicked.
     private func fill(_ down: Bool) -> Color {
+        if active && nested { return down ? HT.surface4 : HT.surface3 }
         if active { return down ? HT.signalMid : HT.signal }
         if down { return HT.surface4 }
         return hovering ? HT.surface3 : Color.clear
@@ -147,7 +167,7 @@ private struct SidebarRow: View {
             HStack(spacing: HT.cw) {
                 // The cursor gutter. Always present, so labels never shift on
                 // selection.
-                Text(active ? ">" : " ")
+                Text(active && !nested ? ">" : " ")
                     .foregroundStyle(active ? HT.void : HT.signal)
                     .frame(width: HT.cw)
                 // The icon slot. Leading rather than centred: a single 7pt
@@ -168,12 +188,16 @@ private struct SidebarRow: View {
                 if let badge = item.badge {
                     Text(badge).foregroundStyle(active ? HT.void : HT.inkFaint)
                 }
+                if let expanded {
+                    PixelGlyph(name: expanded ? .caretDown : .caretRight, color: ink(down))
+                        .accessibilityHidden(true)
+                }
             }
             .font(HT.body)
             .foregroundStyle(ink(down))
-            .padding(.leading, HT.cw)
+            .padding(.leading, nested ? HT.cw3 : HT.cw)
             .padding(.trailing, HT.cw2)
-            .frame(height: HT.row)
+            .frame(height: nested || expanded != nil ? HT.row + HT.s2 : HT.row)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(fill(down))
             .contentShape(Rectangle())
@@ -183,6 +207,7 @@ private struct SidebarRow: View {
         .focusEffectDisabled()
         .onHover { hovering = $0 }
         .accessibilityLabel(Text(item.label))
+        .accessibilityValue(Text(expanded.map { $0 ? "Expanded" : "Collapsed" } ?? ""))
         .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 }

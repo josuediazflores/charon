@@ -493,6 +493,43 @@ final class LiveClient: MailStore {
         try await fetch("v1/jarvis/day/\(day)", as: JarvisDay.self)
     }
 
+    func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
+        let query = cursor.map { [URLQueryItem(name: "before", value: $0)] } ?? []
+        let (data, response) = try await session.data(for: request("v1/jarvis/runs", query: query))
+        let code = try check(response)
+        // Older collectors send the web dashboard for unknown paths, sometimes with HTTP 200.
+        if cursor == nil && (code == 404 || (code == 200 && response.mimeType == "text/html")) {
+            struct Jobs: Decodable { let jobs: [JarvisJob] }
+            guard let list = try await fetch("v1/jarvis/jobs", as: Jobs.self) else { throw MailError.http(404) }
+            return OvernightRunPage(runs: list.jobs.map(OvernightRun.legacy), nextCursor: nil, legacy: true)
+        }
+        guard code == 200 else { throw MailError.http(code) }
+        return try MailJSON.decoder.decode(OvernightRunPage.self, from: data)
+    }
+
+    func overnightRun(id: String) async throws -> OvernightRun? {
+        guard OvernightRun.validID(id) else { throw MailError.badKey }
+        return try await fetch("v1/jarvis/runs/\(id)", as: OvernightRun.self)
+    }
+
+    func overnightFile(run: String, file: String) async throws -> URL? {
+        guard OvernightRun.validID(run), OvernightRun.validID(file) else { throw MailError.badKey }
+        let path = "v1/jarvis/runs/\(run)/files/\(file)"
+        let (url, response) = try await session.download(for: request(path, accept: "application/octet-stream"))
+        do {
+            let code = try check(response)
+            if code == 404 {
+                try? FileManager.default.removeItem(at: url)
+                return nil
+            }
+            guard code == 200 else { throw MailError.http(code) }
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+
     func jarvisJobs() async -> [JarvisJob]? {
         await list("v1/jarvis/jobs", key: "jobs", as: JarvisJob.self)
     }
