@@ -154,18 +154,22 @@ The first reader uses each existing job record as one run. A run summary contain
 `id`, `title`, `status`, `created_at` and `updated_at`. Follow a non-null
 `next_cursor` with `?before=<cursor>` to read the next page in descending job-ID
 order. Detail adds `request`, `markdown`, nullable `error`, `sources` and `files`.
-Markdown contains the whole saved result, including any truncation the runner
-already recorded. Source entries contain a `label` and HTTP(S) `url` found in
-the report. They are references from the saved text.
+The worker creates `$BASE/jarvis/runs/<job-id>/files/` for each job. It gives
+the agent that path for requested deliverables and asks it to cite its sources
+with descriptive Markdown links. On success, the worker saves the final reply
+as `report.md` with an atomic rename before marking the job done.
 
-The legacy runner has no attachment manifest. A producer can preserve a run’s
-deliverables under `$BASE/jarvis/runs/<job-id>/files/`, keeping the relative paths
-used by the report. Each regular supported document in that folder appears with
-its opaque `id`, display `label` and report-relative `path`. Markdown, text, CSV,
-JSON, PDF, DOCX, JPEG and PNG are supported. Keep this folder specific to one run.
-An old run with no archived deliverables returns an empty file list. Absolute
-paths printed by a job do not grant access to files elsewhere on the Pi. These
-routes never create directories, queue jobs or migrate old records.
+For completed jobs, the report reader opens the archived UTF-8 `report.md` and
+extracts source labels and HTTP(S) URLs from its Markdown. The inline report
+limit is 2 MiB. If the archive is missing, unreadable or larger, the reader
+uses the result saved in the job record, including any truncation marker.
+Running, stopped and failed jobs display their saved result.
+
+Each supported regular file in the run directory appears with its opaque `id`,
+display `label` and report-relative `path`. The file endpoint streams the
+original bytes, including larger reports. Supported formats are Markdown,
+text, CSV, JSON, PDF, DOCX, JPEG and PNG. Symbolic links and files with multiple
+hard links are excluded. Legacy runs can have an empty file list.
 
 ### Writes
 

@@ -77,6 +77,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
 # Where Jarvis lives. Under the chat tree rather than beside it because all
@@ -217,6 +218,40 @@ def take_lock():
 
 def job_path(jid):
     return os.path.join(JOBS_DIR, f"{jid}.json")
+
+
+@contextmanager
+def run_files(jid):
+    """Create and pin the run's attachment directory without following links."""
+    if not JOB_ID.fullmatch(jid):
+        raise ValueError("invalid job id")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(JARVIS_DIR, flags)
+    try:
+        for name in ("runs", jid, "files"):
+            try:
+                os.mkdir(name, 0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(name, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def archive_report(files_fd, markdown):
+    # The reader ignores hidden files. Publish only when the full write closes.
+    tmp = f".report-{os.urandom(8).hex()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=files_fd)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as report:
+            report.write(markdown.rstrip() + "\n")
+        os.replace(tmp, "report.md", src_dir_fd=files_fd, dst_dir_fd=files_fd)
+    except BaseException:
+        os.unlink(tmp, dir_fd=files_fd)
+        raise
 
 
 def read_job(jid):
@@ -935,7 +970,26 @@ def run(jid):
         fresh["updated_at"] = stamp()
         write_job(jid, fresh)
 
-    state, stopped = run_job(jid, doc, text, on_beat)
+    files_path = os.path.join(JARVIS_DIR, "runs", jid, "files")
+    prompt = (
+        "Return your final report in Markdown. Cite sources you actually used with "
+        "descriptive inline links so they appear in Overnight tasks. The runner saves "
+        "that reply as report.md. For requested deliverables, save a copy in this "
+        f"run's Files directory: {files_path}. Use descriptive filenames and verify "
+        "each file before mentioning it.\n\nAssignment:\n" + text
+    )
+    try:
+        with run_files(jid) as files_fd:
+            state, stopped = run_job(jid, doc, prompt, on_beat)
+            if state.ok and not stopped:
+                try:
+                    archive_report(files_fd, state.result_text or state.final_text())
+                except OSError as exc:
+                    state.ok = False
+                    state.error = f"could not save report.md: {exc}"
+    except OSError as exc:
+        settle(jid, doc, ERROR, error=f"could not run the job in its workspace: {exc}")
+        return
 
     body = state.final_text()
     if stopped:

@@ -11,6 +11,9 @@ from urllib.parse import urlsplit
 
 
 JOB_ID = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}-[0-9a-f]{4}")
+# The JSON detail response inlines the report. Larger files can be streamed
+# separately through their authenticated attachment route.
+INLINE_REPORT_BYTES = 2 * 1024 * 1024
 _DIR = os.O_DIRECTORY | os.O_RDONLY | os.O_NOFOLLOW
 _FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _LINK = re.compile(r"(?:\[([^\[\]\n]{1,256})\]\(\s*<?)?(https?://[^\s<>\"\\\x00-\x1f\x7f]+)", re.I)
@@ -147,9 +150,25 @@ def _file_rows(root, jid):
     return sorted(rows, key=lambda r: r["path"])
 
 
+def report_text(root, doc):
+    saved = _text(doc, "result")
+    # The worker also settles cancelled jobs as done with this terminal line.
+    # Keep their partial transcript even if the agent drafted a report file.
+    if doc.get("status") != "done" or saved == "[stopped]" or saved.endswith("\n[stopped]"):
+        return saved
+    try:
+        with directory(root, ["runs", doc["id"], "files"]) as fd, regular_file(fd, "report.md") as f:
+            data = f.read(INLINE_REPORT_BYTES + 1)
+            if len(data) <= INLINE_REPORT_BYTES:
+                return data.decode("utf-8") or saved
+    except (OSError, RunError, UnicodeDecodeError):
+        pass
+    return saved
+
+
 def detail(root, queued, jid):
     doc = job_doc(root, jid)
-    markdown = _text(doc, "result")
+    markdown = report_text(root, doc)
     return {**row(doc, queued), "request": _text(doc, "text"), "error": _text(doc, "error") or None,
             "markdown": markdown, "sources": sources(markdown), "files": _file_rows(root, jid)}
 

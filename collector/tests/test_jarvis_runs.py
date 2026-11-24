@@ -117,3 +117,34 @@ class RunRoutes(unittest.TestCase):
     def test_rejects_invalid_authorities_and_keeps_plain_web_sources(self):
         text = "Direct https://example.org/a. [no](file:///tmp/no) https://user:pw@secret.test/a https://[bad"
         self.assertEqual(runs.sources(text), [{"label": "https://example.org/a", "url": "https://example.org/a"}])
+
+    def test_completed_report_and_sources_use_the_archive(self):
+        self.files.mkdir(parents=True)
+        report = self.files / "report.md"
+        full = "Summary\n\n[Full posting](https://example.org/late-source)\n"
+        report.write_text(full)
+        self.save(self.jid, result="Summary\n\n[output truncated]")
+        detail = self.get("/" + self.jid)[1]
+        self.assertEqual(detail["markdown"], full)
+        self.assertEqual(detail["sources"], [{"label": "Full posting", "url": "https://example.org/late-source"}])
+        file_path = "/" + self.jid + "/files/" + detail["files"][0]["id"]
+        with patch.object(runs, "INLINE_REPORT_BYTES", 16):
+            self.assertEqual(self.get("/" + self.jid)[1]["markdown"], "Summary\n\n[output truncated]")
+            self.assertEqual(self.get(file_path), (200, full.encode()))
+        for state, result in (("active", "Running"), ("error", "Partial"), ("done", "Partial\n\n[stopped]")):
+            self.save(self.jid, status=state, result=result)
+            self.assertEqual(self.get("/" + self.jid)[1]["markdown"], result)
+
+    def test_unreadable_or_external_report_uses_job_result(self):
+        self.files.mkdir(parents=True)
+        report = self.files / "report.md"
+        report.write_bytes(b"\xff")
+        self.assertEqual(self.get("/" + self.jid)[1]["markdown"], self.result)
+        report.unlink()
+        outside = self.root / "outside.md"
+        outside.write_text("External content")
+        report.symlink_to(outside)
+        self.assertEqual(self.get("/" + self.jid)[1]["markdown"], self.result)
+        report.unlink()
+        os.link(outside, report)
+        self.assertEqual(self.get("/" + self.jid)[1]["markdown"], self.result)
