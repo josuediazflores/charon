@@ -1,16 +1,5 @@
 import SwiftUI
 
-/* ── HTButton / IconButton ─────────────────────────────────────────────
-   [ Ship build ]   < Run tests >   [ Halt ]
-
-   Bracketed labels, inverse video on hover. `primary` is inverse at rest --
-   the way a TUI marks the default action -- so there is never a question of
-   which key Enter is bound to.
-
-   Named `HTButton` because `Button` is SwiftUI's and `Kbd` is already the mail
-   dialect's. The two dialects share a window and must not share a name.
-*/
-
 enum HTButtonVariant { case primary, secondary, ghost, quiet, danger }
 enum HTButtonSize { case sm, md, lg }
 
@@ -75,10 +64,6 @@ struct HTButton: View {
     var iconAfter: String? = nil
     var block: Bool = false
     var caps: Bool = false
-    /// `<` `>` instead of `[` `]`. Conventionally marks an action that
-    /// navigates rather than commits.
-    var angle: Bool = false
-    var nobracket: Bool = false
     var disabled: Bool = false
     var action: () -> Void
 
@@ -92,76 +77,41 @@ struct HTButton: View {
         }
     }
 
-    private var brackets: (String, String)? {
-        if nobracket || variant == .quiet { return nil }
-        return angle ? ("<", ">") : ("[", "]")
-    }
-
-    /// Held down, a control goes hot whether or not the pointer ever hovered
-    /// it -- a key press and a click land the same way -- and a control that
-    /// was hot already takes its fill one step down the ramp, so the click is
-    /// visible on top of the hover rather than hidden under it.
-    private func hot(_ down: Bool) -> Bool { (hovering || down) && !disabled }
-
     private func ink(_ down: Bool) -> Color {
         if disabled { return HT.inkFaint }
-        let hot = hot(down)
         switch variant {
-        case .primary: return HT.void
-        case .secondary: return hot ? HT.void : HT.inkBright
-        case .ghost: return hot ? HT.void : HT.inkMid
-        case .quiet: return hot ? HT.inkBright : HT.inkDim
-        case .danger: return hot ? HT.void : HT.fault
+        case .primary: return FocusInk.ground
+        case .danger: return HT.fault
+        case .ghost, .quiet: return hovering || down ? FocusInk.text : HT.inkMid
+        case .secondary: return FocusInk.text
         }
     }
 
     private func fill(_ down: Bool) -> Color {
         if disabled { return .clear }
-        let held = down && !disabled
-        let hot = hot(down)
-        switch variant {
-        case .primary: return held ? HT.signalMid : HT.signal
-        case .secondary: return held ? HT.inkMid : (hot ? HT.inkBright : .clear)
-        case .ghost: return held ? HT.inkDim : (hot ? HT.inkMid : .clear)
-        // The one variant with no fill of its own. It gets a plate rather than
-        // a step, which is the rail's answer to the same question.
-        case .quiet: return held ? HT.surface4 : .clear
-        case .danger: return held ? HT.c1 : (hot ? HT.fault : .clear)
-        }
-    }
-
-    private func border(_ down: Bool) -> Color {
-        variant == .secondary ? (hot(down) ? HT.inkBright : HT.line) : .clear
-    }
-
-    private func bracketInk(_ down: Bool) -> Color {
-        if disabled { return HT.inkFaint }
-        switch variant {
-        case .primary: return HT.void
-        case .secondary, .ghost, .danger: return hot(down) ? HT.void : HT.inkFaint
-        case .quiet: return .clear
-        }
+        if variant == .primary { return down ? HT.inkMid : FocusInk.sand }
+        if down { return HT.surface4 }
+        if hovering || variant == .secondary { return HT.surface3 }
+        return .clear
     }
 
     var body: some View {
         Button(action: { if !disabled { action() } }) {
             Pressed { down in
                 HStack(spacing: HT.cw) {
-                    if let brackets { Text(brackets.0).foregroundStyle(bracketInk(down)) }
                     if let icon { Text(icon) }
                     Text(caps ? title.uppercased() : title)
-                        .underline(variant == .quiet && hot(down))
+                        .underline(variant == .quiet && (hovering || down))
                     if let iconAfter { Text(iconAfter) }
-                    if let brackets { Text(brackets.1).foregroundStyle(bracketInk(down)) }
                 }
-                .font(HT.body)
+                .font(.system(size: size == .sm ? 11 : 13, weight: .medium))
                 .foregroundStyle(ink(down))
                 .lineLimit(1)
-                .padding(.horizontal, size == .lg ? HT.cw2 : HT.cw)
+                .padding(.horizontal, size == .sm ? 6 : 12)
                 .frame(height: height)
                 .frame(maxWidth: block ? .infinity : nil)
-                .background(fill(down))
-                .overlay { Rectangle().strokeBorder(border(down), lineWidth: 1) }
+                .background(fill(down), in: RoundedRectangle(cornerRadius: 7))
+                .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(variant == .secondary ? FocusInk.cardLine : .clear) }
                 .contentShape(Rectangle())
             }
         }
@@ -231,12 +181,12 @@ struct IconButton: View {
     private func fill(_ down: Bool) -> Color {
         if disabled { return .clear }
         let held = down && !disabled
-        if on { return held ? HT.signalMid : HT.signal }
+        if on { return held ? HT.inkMid : FocusInk.sand }
         return held ? HT.inkDim : (hot(down) ? HT.inkMid : .clear)
     }
 
     private var border: Color {
-        if on { return HT.signal }
+        if on { return FocusInk.sand }
         return bordered ? HT.line : .clear
     }
 
@@ -249,11 +199,11 @@ struct IconButton: View {
                     case .pixel(let glyph): PixelGlyph(name: glyph, color: ink(down))
                     }
                 }
-                .font(HT.body)
+                .font(.system(size: size == .sm ? 11 : 13, weight: .medium))
                 .foregroundStyle(ink(down))
                 .frame(width: side, height: side)
-                .background(fill(down))
-                .overlay { Rectangle().strokeBorder(border, lineWidth: 1) }
+                .background(fill(down), in: RoundedRectangle(cornerRadius: 7))
+                .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(border) }
                 .contentShape(Rectangle())
             }
         }

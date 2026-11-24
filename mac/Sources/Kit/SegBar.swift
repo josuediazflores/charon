@@ -1,16 +1,5 @@
 import SwiftUI
 
-/* ── SegBar ────────────────────────────────────────────────────────────
-   CPU  ████░░░░░░  34%
-
-   Drawn in block characters, not boxes. A run of █ against ░ is what a
-   terminal meter is, and because both glyphs occupy exactly one cell the bar
-   stays aligned with every other bar in the column for free.
-
-   Tracking is zero and stays zero: block glyphs have to butt up against each
-   other with no seam, or the bar reads as a dotted line.
-*/
-
 enum SegBarFill {
     case block, shade, bar, equals
 
@@ -80,23 +69,32 @@ struct SegBar: View {
     var body: some View {
         HStack(spacing: HT.cw) {
             if let label {
-                Text(label.uppercased())
+                Text(label)
                     .foregroundStyle(HT.inkMid)
                     .fixedSize()
             }
-            if brackets { Text("[").foregroundStyle(HT.inkFaint).fixedSize() }
 
-            HStack(spacing: 0) {
-                ForEach(cells, id: \.id) { cell in
-                    Text(cell.text).foregroundStyle(cell.ink)
+            if fill == .block && limit == nil {
+                GeometryReader { geometry in
+                    Capsule().fill(HT.surface4)
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(onInk).frame(width: geometry.size.width * ratio)
+                        }
                 }
+                .frame(width: block ? nil : CGFloat(segments) * HT.cw, height: brackets ? 6 : 4)
+            } else {
+                if brackets { Text("[").foregroundStyle(HT.inkFaint) }
+                HStack(spacing: 0) {
+                    ForEach(cells, id: \.id) { cell in
+                        Text(cell.text).foregroundStyle(cell.ink)
+                    }
+                }
+                .kerning(0)
+                .tracking(0)
+                .fixedSize()
+                if brackets { Text("]").foregroundStyle(HT.inkFaint) }
+                if block { Spacer(minLength: HT.cw) }
             }
-            .kerning(0)
-            .tracking(0)
-            .fixedSize()
-
-            if brackets { Text("]").foregroundStyle(HT.inkFaint).fixedSize() }
-            if block { Spacer(minLength: HT.cw) }
             if showReadout {
                 Text(readout ?? "\(Int((ratio * 100).rounded()))%")
                     .foregroundStyle(HT.ink)

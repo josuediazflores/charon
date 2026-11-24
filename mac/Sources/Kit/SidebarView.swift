@@ -1,65 +1,25 @@
 import SwiftUI
 
-/* ── SidebarView / RailStub ────────────────────────────────────────────
-     HALFTONE
-   > ◉ Overview            The active item is marked by a `>` in the gutter
-     ⏻ Hardware            and inverse video, the way a TUI menu marks the
-     ▤ CMO                 line the cursor is on.
-
-   No fills, no edge bars. One column of gutter, then the label.
-
-   The shell swaps the sidebar for RailStub when collapsed.
-*/
-
-/// What stands in a rail row's icon slot.
-///
-/// Two cases because the rail is set in two things at once: the glyphs
-/// Departure Mono actually has are characters, and the five it does not have
-/// are drawn as bitmaps at the same resolution rather than borrowed from a
-/// system face. A row does not care which it got -- both land in the same
-/// fourteen-point slot, in the row's current ink.
-enum SidebarIcon {
-    case text(String)
-    case pixel(PixelGlyphName)
-}
-
 struct SidebarItemSpec: Identifiable {
     var id: String
-    var icon: SidebarIcon
+    var symbol: String
     var label: String
     var badge: String?
-
-    init(id: String, icon: SidebarIcon, label: String, badge: String? = nil) {
-        self.id = id
-        self.icon = icon
-        self.label = label
-        self.badge = badge
-    }
 }
 
-/// The rail's eight destinations, in the reference's literal order.
-///
-/// **Five of these are drawn, not typed.** ◉ ⏻ ▤ ✉ ⧉ are not in Departure Mono
-/// and used to fall back to a system face, a pixel off the grid and at another
-/// weight; they are `PixelGlyph` bitmaps now, which is the same shape at the
-/// resolution the rest of the rail is set at. The web reference still has the
-/// character version of the bug (App.tsx:44-48). ❯ ✦ ⌘ are in the face and stay
-/// characters.
 enum ConsoleNav {
-    static let items: [SidebarItemSpec] = [
-        SidebarItemSpec(id: "overview", icon: .pixel(.overview), label: "Overview"),
-        SidebarItemSpec(id: "hardware", icon: .pixel(.hardware), label: "Hardware"),
-        SidebarItemSpec(id: "cmo", icon: .pixel(.cmo), label: "CMO"),
-        SidebarItemSpec(id: "mail", icon: .pixel(.mail), label: "Mail"),
-        // Two overlapping shapes, which is what the canvas's two-bubble pixel
-        // icon says in a rail this size.
-        SidebarItemSpec(id: "messages", icon: .pixel(.messages), label: "Messages"),
-        SidebarItemSpec(id: "chat", icon: .text("❯"), label: "Chat"),
-        SidebarItemSpec(id: "jarvis", icon: .text("✦"), label: "Jarvis"),
-        SidebarItemSpec(id: "settings", icon: .text("⌘"), label: "Settings"),
+    static let items = [
+        SidebarItemSpec(id: "overview", symbol: "square.grid.2x2", label: "Overview"),
+        SidebarItemSpec(id: "hardware", symbol: "cpu", label: "Hardware"),
+        SidebarItemSpec(id: "cmo", symbol: "newspaper", label: "CMO"),
+        SidebarItemSpec(id: "mail", symbol: "envelope", label: "Mail"),
+        SidebarItemSpec(id: "messages", symbol: "bubble.left.and.bubble.right", label: "Messages"),
+        SidebarItemSpec(id: "chat", symbol: "text.bubble", label: "Chat"),
+        SidebarItemSpec(id: "jarvis", symbol: "sparkle", label: "Jarvis"),
+        SidebarItemSpec(id: "settings", symbol: "gearshape", label: "Settings"),
     ]
 
-    static let overnight = SidebarItemSpec(id: "jarvis-overnight", icon: .text(""), label: "Overnight tasks")
+    static let overnight = SidebarItemSpec(id: "jarvis-overnight", symbol: "moon", label: "Overnight tasks")
     static let destinations = items.flatMap { $0.id == "jarvis" ? [$0, overnight] : [$0] }
     static let ids: Set<String> = Set(destinations.map(\.id))
 
@@ -82,22 +42,22 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: HT.cw) {
-                PixelGlyph(name: .brand, color: HT.signal)
+                Image(systemName: "circle.hexagongrid.fill")
+                    .font(.system(size: 17)).foregroundStyle(FocusInk.sand)
                     .frame(width: HT.cw2, alignment: .leading)
-                Text(name.uppercased())
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkBright)
+                Text(name)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(FocusInk.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let brandAside { brandAside }
             }
             .padding(.horizontal, HT.cw2)
-            .frame(height: HT.row3)
-            .overlay(alignment: .bottom) { Rectangle().fill(HT.line).frame(height: 1) }
+            .frame(height: 56)
 
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
                     ForEach(items) { item in
                         if item.id == "jarvis" {
                             let sectionActive = active == item.id || active == ConsoleNav.overnight.id
@@ -106,7 +66,7 @@ struct SidebarView: View {
                                 jarvisExpanded.toggle()
                             }
                             if jarvisExpanded {
-                                SidebarRow(item: .init(id: item.id, icon: .text(""), label: "Daily Brief"),
+                                SidebarRow(item: .init(id: item.id, symbol: "text.bubble", label: "Conversation"),
                                            active: active == item.id, nested: true) { onSelect(item.id) }
                                 SidebarRow(item: ConsoleNav.overnight, active: active == ConsoleNav.overnight.id,
                                            nested: true) { onSelect(ConsoleNav.overnight.id) }
@@ -118,7 +78,8 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .padding(.vertical, HT.row)
+                .padding(.vertical, 9)
+                .padding(.horizontal, 9)
             }
             .frame(maxHeight: .infinity)
 
@@ -126,13 +87,12 @@ struct SidebarView: View {
                 footer
                     .padding(.horizontal, HT.cw2)
                     .padding(.vertical, HT.s2)
-                    .overlay(alignment: .top) { Rectangle().fill(HT.line).frame(height: 1) }
             }
         }
-        .frame(width: 200)
+        .frame(width: 196)
         .frame(maxHeight: .infinity)
         .background(Color.clear)
-        .overlay(alignment: .trailing) { Rectangle().fill(HT.line).frame(width: 1) }
+        .overlay(alignment: .trailing) { Rectangle().fill(FocusInk.cardLine).frame(width: 1) }
     }
 }
 
@@ -144,66 +104,40 @@ private struct SidebarRow: View {
     var select: () -> Void
 
     @State private var hovering = false
-
-    private func ink(_ down: Bool) -> Color {
-        if active { return nested ? HT.inkBright : HT.void }
-        return (hovering || down) ? HT.inkBright : HT.inkMid
-    }
-
-    /// Held down, a row goes one plate past its hover. The active row keeps its
-    /// cyan and steps that instead: its ink is the ground, and a surface under
-    /// ground-coloured type would be a row that vanished for as long as it was
-    /// being clicked.
-    private func fill(_ down: Bool) -> Color {
-        if active && nested { return down ? HT.surface4 : HT.surface3 }
-        if active { return down ? HT.signalMid : HT.signal }
-        if down { return HT.surface4 }
-        return hovering ? HT.surface3 : Color.clear
-    }
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: select) {
             Pressed { down in
-            HStack(spacing: HT.cw) {
-                // The cursor gutter. Always present, so labels never shift on
-                // selection.
-                Text(active && !nested ? ">" : " ")
-                    .foregroundStyle(active ? HT.void : HT.signal)
-                    .frame(width: HT.cw)
-                // The icon slot. Leading rather than centred: a single 7pt
-                // glyph centred in a 14pt box lands on a half cell, and the
-                // column has to read straight down whichever kind of icon a
-                // row got.
-                Group {
-                    switch item.icon {
-                    case .text(let glyph): Text(glyph)
-                    case .pixel(let glyph): PixelGlyph(name: glyph, color: ink(down))
+                HStack(spacing: 10) {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: nested ? 11 : 14))
+                        .frame(width: 17)
+                        .foregroundStyle(active || item.id == "jarvis" ? FocusInk.sand : HT.inkMid)
+                    Text(item.label)
+                        .font(.system(size: nested ? 12 : 13, weight: active ? .semibold : .regular))
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    if let badge = item.badge { Text(badge).font(.caption) }
+                    if let expanded {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
                     }
                 }
-                .frame(width: HT.cw2, alignment: .leading)
-                Text(item.label)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let badge = item.badge {
-                    Text(badge).foregroundStyle(active ? HT.void : HT.inkFaint)
+                .foregroundStyle(active || hovering ? FocusInk.text : HT.inkMid)
+                .padding(.horizontal, 10)
+                .frame(height: nested ? 30 : 34)
+                .background(down ? HT.surface4 : (active || hovering ? HT.surface3 : .clear),
+                            in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    if focused { RoundedRectangle(cornerRadius: 8).strokeBorder(FocusInk.sand) }
                 }
-                if let expanded {
-                    PixelGlyph(name: expanded ? .caretDown : .caretRight, color: ink(down))
-                        .accessibilityHidden(true)
-                }
-            }
-            .font(HT.body)
-            .foregroundStyle(ink(down))
-            .padding(.leading, nested ? HT.cw3 : HT.cw)
-            .padding(.trailing, HT.cw2)
-            .frame(height: nested || expanded != nil ? HT.row + HT.s2 : HT.row)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(fill(down))
-            .contentShape(Rectangle())
+                .padding(.leading, nested ? 18 : 0)
+                .contentShape(Rectangle())
             }
         }
         .buttonStyle(HTPressStyle())
+        .focused($focused)
         .focusEffectDisabled()
         .onHover { hovering = $0 }
         .accessibilityLabel(Text(item.label))
@@ -212,49 +146,20 @@ private struct SidebarRow: View {
     }
 }
 
-/// The rail, collapsed to a strip.
-///
-/// Four cells of ground at the far left, the brand mark in a cap the height of
-/// the bar beside it, and under that the same `>` the rail's own active item
-/// carries -- which is the whole of the affordance, because `>` already means
-/// "this way" everywhere else in this console. Instant on click: a strip that
-/// slid back out would be the one animation in the system.
 struct RailStub: View {
     var onShow: () -> Void
 
-    @State private var hovering = false
-
     var body: some View {
-        Button(action: onShow) {
-            Pressed { down in
-            VStack(spacing: 0) {
-                // The cap keeps the console's one horizontal rule unbroken:
-                // the brand row and the top bar are both 48 tall and ruled off
-                // underneath, so a strip without this would put a four-cell
-                // notch in that line.
-                PixelGlyph(name: .brand, color: HT.signal)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: HT.row3)
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(HT.line).frame(height: 1)
-                    }
-                Text(">")
-                    .foregroundStyle(HT.signal)
-                    .padding(.top, HT.row)
-                Spacer(minLength: 0)
+        VStack {
+            Button(action: onShow) {
+                Image(systemName: "sidebar.left").foregroundStyle(FocusInk.sand)
+                    .frame(width: 38, height: 54).contentShape(Rectangle())
             }
-            .font(HT.body)
-            .frame(width: HT.cw4)
-            .frame(maxHeight: .infinity)
-            .background(down ? HT.surface4 : (hovering ? HT.surface3 : Color.clear))
-            .contentShape(Rectangle())
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show sidebar")
+            .help("Show sidebar (⌥⌘S)")
+            Spacer()
         }
-        .buttonStyle(HTPressStyle())
-        .focusEffectDisabled()
-        .onHover { hovering = $0 }
-        .overlay(alignment: .trailing) { Rectangle().fill(HT.line).frame(width: 1) }
-        .accessibilityLabel(Text("Show sidebar"))
-        .help("Show sidebar (⌥⌘S)")
+        .overlay(alignment: .trailing) { Rectangle().fill(FocusInk.cardLine).frame(width: 1) }
     }
 }

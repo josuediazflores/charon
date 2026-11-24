@@ -110,86 +110,48 @@ struct ContextMeter: View {
 
 // MARK: - the turns
 
-/// The human's turn: a tinted card at the right margin.
-///
-/// **The block is right-aligned and the text inside it is not.** The position
-/// says who spoke; ragging the right edge of the prose would say the same thing
-/// a second time and charge the reader for it. ~62 cells at the widest: past
-/// about that width a card stops reading as a turn and starts reading as the
-/// page. The clock sits outside it, hard against its left edge, so the two are
-/// one object rather than a reading at a far margin.
 struct JarvisAskTurn: View {
     var text: String
     var at: String?
 
-    @State private var hovering = false
-
     var body: some View {
-        HStack(alignment: .top, spacing: HT.cw) {
-            Spacer(minLength: 0)
-            Group {
-                if let at, !at.isEmpty {
-                    Text(Fmt.hhmm(at)).font(HT.body).foregroundStyle(HT.inkMid)
-                } else {
-                    // No time yet: this is the optimistic copy of something the
-                    // Pi has not confirmed. `--:--` there would be a stated
-                    // unknown where the truth is "not yet".
-                    Color.clear
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("You").font(.system(size: 12, weight: .semibold))
+                if let at, !at.isEmpty { Text(Fmt.hhmm(at)).font(.caption2).foregroundStyle(.secondary) }
             }
-            .frame(width: HT.cw * 5, height: HT.row, alignment: .trailing)
-
-            // ~62 cells at the widest. A message is usually one line and
-            // occasionally a pasted unit file; past about that width a card stops
-            // reading as a turn and starts reading as the page.
-            MaxWidth(limit: HT.cw * 62) {
-                Text(text)
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkBright)
-                    .lineSpacing(HT.row - 11)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, HT.s1)
-                    .padding(.horizontal, HT.cw2)
-                    .background(hovering ? HT.surface3 : HT.surface2)
-                    // mail's own radius step, so the three dialects round
-                    // identically rather than each inventing a curve.
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .onHover { hovering = $0 }
-            }
+            Text(text).font(.system(size: 15)).lineSpacing(3).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color(white: 0.15), in: RoundedRectangle(cornerRadius: 11))
+        .frame(maxWidth: 560, alignment: .trailing)
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.top, HT.row)
+        .padding(.top, 16)
     }
 }
 
-/// The answer: prose on the ground at the left margin, full measure, no box.
-///
-/// The clock lives in the receipts under the answer rather than in a gutter
-/// beside it. A gutter would inset the prose from the margin that is doing the
-/// work of saying who spoke -- and the card above has already drawn the turn
-/// boundary a clock column would otherwise be earning its width with.
 struct JarvisAnswerTurn: View {
     var turn: JarvisSayTurn
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle").foregroundStyle(HT.c11)
+                Text("Jarvis").fontWeight(.semibold)
+                if !turn.at.isEmpty { Text(Fmt.hhmm(turn.at)).font(.caption2).foregroundStyle(.secondary) }
+            }.font(.system(size: 12))
             if let tools = turn.tools, !tools.isEmpty { ToolLines(tools: tools) }
-            if !turn.text.isEmpty { AnswerBody(text: turn.text) }
-            TurnMeta {
-                Text(meta).font(HT.body).foregroundStyle(HT.inkMid)
+            if !turn.text.isEmpty {
+                Text(turn.text).font(.system(size: 15)).lineSpacing(3)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
+            let receipt = [turn.model?.rawValue, turn.elapsedS.map { String(format: "%.1fs", $0) }]
+                .compactMap { $0 }.joined(separator: " · ")
+            if !receipt.isEmpty { Text(receipt).font(.caption2).foregroundStyle(.secondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, HT.row)
-    }
-
-    private var meta: String {
-        var parts: [String] = []
-        if !turn.at.isEmpty { parts.append(Fmt.hhmm(turn.at)) }
-        parts.append(turn.model?.rawValue ?? "—")
-        if let elapsed = turn.elapsedS { parts.append("\(String(format: "%.1f", elapsed))s") }
-        return parts.joined(separator: " · ")
+        .padding(.top, 18)
     }
 }
 
@@ -473,6 +435,7 @@ struct JarvisTranscript: View {
     /// A message this window sent that the Pi has not confirmed yet.
     var sending: String?
     var failed: String?
+    var readOnly: Bool
     var onCompact: () -> Void
     var onStopJob: (String) -> Void
 
@@ -502,7 +465,7 @@ struct JarvisTranscript: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if timeline.isEmpty, sending == nil, !live {
-                Text("nothing said today · talk reads this pi, and jobs do the changing")
+                Text(readOnly ? "No messages for this day." : "No messages yet.")
                     .font(HT.body)
                     .foregroundStyle(HT.inkMid)
                     .fixedSize(horizontal: false, vertical: true)
@@ -564,10 +527,12 @@ struct JarvisTranscript: View {
             JarvisJobCard(turn: job,
                           job: jobs?.first { $0.id == job.jobId },
                           onStop: onStopJob)
+                .disabled(readOnly)
         case .notice(let notice):
             JarvisNotice(turn: notice,
                          folded: foldedAfter(notice.at),
                          onCompact: onCompact)
+                .disabled(readOnly)
         case .unknown:
             EmptyView()
         }

@@ -40,9 +40,9 @@ struct Metric: View {
 
     private var valueFont: Font {
         switch size {
-        case .compact: return HT.lead
-        case .standard: return HT.metric
-        case .hero: return HT.hero
+        case .compact: return FocusInk.heading(26)
+        case .standard: return FocusInk.heading(38)
+        case .hero: return FocusInk.heading(48)
         }
     }
 
@@ -54,13 +54,13 @@ struct Metric: View {
         }
     }
 
-    private var valueInk: Color { dim ? HT.inkDim : (tone.ink ?? HT.inkBright) }
+    private var valueInk: Color { dim ? HT.inkDim : (tone.ink ?? FocusInk.text) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: HT.cw) {
                 Text(label.lowercased())
-                    .font(HT.body)
+                    .font(FocusInk.body)
                     .foregroundStyle(HT.inkMid)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -74,10 +74,10 @@ struct Metric: View {
                     .font(valueFont)
                     .foregroundStyle(inverse ? HT.void : valueInk)
                     .lineLimit(1)
-                    .minimumScaleFactor(1)
+                    .minimumScaleFactor(0.78)
                 if let unit {
                     Text(unit)
-                        .font(HT.body)
+                        .font(FocusInk.body)
                         .foregroundStyle(inverse ? HT.void : HT.inkDim)
                         .lineLimit(1)
                 }
@@ -89,7 +89,7 @@ struct Metric: View {
 
             if let footer {
                 footer
-                    .font(HT.body)
+                    .font(FocusInk.body)
                     .foregroundStyle(HT.inkDim)
                     .frame(maxWidth: .infinity, minHeight: HT.row, alignment: .leading)
             }

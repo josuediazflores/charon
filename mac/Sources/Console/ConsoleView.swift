@@ -81,7 +81,7 @@ struct ConsoleView: View {
                 CustomWidgetView(spec: spec, isEditing: isEditing, isDemo: isDemo)
             }
         case .identity: identity
-        case .date: PageHead(title: Fmt.longDate(now), subtitle: subtitle)
+        case .date: PageHead(title: Fmt.longDate(now), subtitle: subtitle, titleSize: 30)
         case .pihole: piholeCell
         case .nodes: nodesCell
         case .stillness: stillnessCell
@@ -98,8 +98,7 @@ struct ConsoleView: View {
         Masthead(user: "operator", host: "halftone",
                  rows: mastheadRows,
                  art: settings.masthead.view(cols: settings.mastheadCols,
-                                             imageFile: settings.mastheadImageFile),
-                 swatches: false)
+                                             imageFile: settings.mastheadImageFile))
     }
 
     // MARK: - the identity block

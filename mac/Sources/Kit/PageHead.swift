@@ -1,13 +1,5 @@
 import SwiftUI
 
-/* ── PageHead ──────────────────────────────────────────────────────────
-   TUESDAY 18 AUGUST
-   All sources reporting.
-
-   Names this view. Distinct from `Masthead`, which names the system. The title
-   is the one place the 22px step is used in the console.
-*/
-
 struct PageHead: View {
     var title: String
     /// One line of orientation. Say what the reader is looking at.
@@ -15,22 +7,25 @@ struct PageHead: View {
     /// Controls that apply to the whole view.
     var actions: AnyView? = nil
 
+    var titleSize: CGFloat = 38
+
     @State private var boxWidth: CGFloat = 0
 
     private var narrow: Bool { boxWidth > 0 && boxWidth <= HT.bpSm }
 
     var body: some View {
-        let text = VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
-                .font(HT.lead)
-                .foregroundStyle(HT.inkBright)
+        let text = VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(FocusInk.heading(narrow ? min(31, titleSize) : titleSize))
+                .tracking(-1)
+                .foregroundStyle(FocusInk.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(height: HT.lineLead, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkDim)
+                    .font(FocusInk.body)
+                    .foregroundStyle(HT.inkMid)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

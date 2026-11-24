@@ -1,13 +1,5 @@
 import SwiftUI
 
-/* ── TopBar ────────────────────────────────────────────────────────────
-   $ Search nodes, commits          ⌘K        DEMO  ⟳  ▲▲▲ LIVE
-
-   The bar above the console. Command field on the left, feed state on the
-   right. Forty-eight points tall and ruled off underneath, the same height as
-   the rail's brand row, so the two make one line across the window.
-*/
-
 struct TopBar<Lead: View, Actions: View>: View {
     @ViewBuilder var lead: Lead
     @ViewBuilder var actions: Actions
@@ -20,8 +12,8 @@ struct TopBar<Lead: View, Actions: View>: View {
                 .fixedSize()
         }
         .padding(.horizontal, HT.cw3)
-        .frame(height: HT.row3)
+        .frame(height: 56)
         .background(Color.clear)
-        .overlay(alignment: .bottom) { Rectangle().fill(HT.line).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(FocusInk.cardLine).frame(height: 1) }
     }
 }

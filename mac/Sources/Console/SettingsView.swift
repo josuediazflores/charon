@@ -93,18 +93,7 @@ struct SettingsView: View {
             PageHead(title: "Settings", subtitle: "how this console behaves")
             KeyButton("Connection") { model.showingConnection = true }
 
-            // **A measure, because every row here is a dot leader.** A leader
-            // is a line the eye follows from a label to its control, and on a
-            // 1600pt window these ran the whole pane -- a hundred and eighty
-            // dots between "crt scanlines" and the `[ ON ]` that answers it,
-            // which is a longer trip than the label is worth and further than
-            // anybody can hold a row. 124 cells is the width the notes under
-            // the rows already wrap at comfortably, so the panels stop where
-            // the prose does.
-            //
-            // Leading, and not the centred column the chat list uses: the page
-            // head above is set flush left and a centred body under a flush-left
-            // title is two pages.
+            // Cap prose and control rows at a comfortable reading width.
             VStack(alignment: .leading, spacing: HT.row) {
                 HTGrid {
                     Cell(span: 12) { features }
@@ -373,7 +362,7 @@ struct SettingsView: View {
                             // Stored and shown, and it does nothing yet: v1
                             // gives behaviour to off and confirm only.
                             if row.send == .auto {
-                                Text("(v2)").font(HT.body).foregroundStyle(HT.inkDim)
+                                Text("(v2)").font(FocusInk.body).foregroundStyle(HT.inkDim)
                             }
                         })
                     }),
@@ -647,7 +636,7 @@ struct SettingsView: View {
     }
 
     private func meta(_ text: String) -> some View {
-        Text(text).font(HT.body).foregroundStyle(HT.inkDim).lineLimit(1)
+        Text(text).font(FocusInk.body).foregroundStyle(HT.inkDim).lineLimit(1)
     }
 }
 
@@ -667,18 +656,19 @@ private struct ToggleRow: View {
     var flip: () -> Void
 
     var body: some View {
-        RunRow(spacing: HT.cw, runIndex: 1, runMin: HT.cw2, leadFraction: 0.6) {
-            Text(label.lowercased())
-                .font(HT.body)
-                .foregroundStyle(HT.inkBright)
+        HStack(spacing: 12) {
+            Text(label)
+                .font(FocusInk.body)
+                .foregroundStyle(FocusInk.text)
                 .fixedSize(horizontal: false, vertical: true)
 
-            GlyphRun(glyph: ".", color: HT.inkFaint)
+            Spacer(minLength: 8)
 
-            HTButton(title: on ? "on" : "off", variant: .ghost, size: .sm, caps: true,
-                     action: flip)
+            Toggle(label, isOn: Binding(get: { on }, set: { if $0 != on { flip() } }))
+                .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                .tint(FocusInk.sand)
         }
-        .frame(minHeight: HT.row)
+        .frame(minHeight: 28)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(label))
         .accessibilityValue(Text(on ? "on" : "off"))
@@ -697,21 +687,20 @@ private struct ChoiceRow: View {
     var pick: (String) -> Void
 
     var body: some View {
-        RunRow(spacing: HT.cw, runIndex: 1, runMin: HT.cw2, leadFraction: 0.6) {
-            Text(label.lowercased())
-                .font(HT.body)
-                .foregroundStyle(HT.inkBright)
+        HStack(spacing: 12) {
+            Text(label)
+                .font(FocusInk.body)
+                .foregroundStyle(FocusInk.text)
                 .fixedSize(horizontal: false, vertical: true)
 
-            GlyphRun(glyph: ".", color: HT.inkFaint)
+            Spacer(minLength: 8)
 
-            // Downward, unlike the composers': this button is near the top of a
-            // long page, and a list opening up from here would be the one
-            // clipped by the console's own scrollport.
-            Listbox(label: label, value: value, options: options,
-                    quiet: true, caps: true, opensUp: false, onPick: pick)
+            Picker(label, selection: Binding(get: { value }, set: pick)) {
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.menu).fixedSize()
         }
-        .frame(minHeight: HT.row)
+        .frame(minHeight: 28)
     }
 }
 
@@ -731,18 +720,18 @@ private struct ActionRow: View {
     var act: () -> Void
 
     var body: some View {
-        RunRow(spacing: HT.cw, runIndex: 1, runMin: HT.cw2, leadFraction: 0.6) {
-            Text(label.lowercased())
-                .font(HT.body)
-                .foregroundStyle(HT.inkBright)
+        HStack(spacing: 12) {
+            Text(label)
+                .font(FocusInk.body)
+                .foregroundStyle(FocusInk.text)
                 .fixedSize(horizontal: false, vertical: true)
 
-            GlyphRun(glyph: ".", color: HT.inkFaint)
+            Spacer(minLength: 8)
 
-            HTButton(title: title, variant: .ghost, size: .sm, caps: true,
+            HTButton(title: title, variant: .ghost, size: .sm,
                      disabled: disabled, action: act)
         }
-        .frame(minHeight: HT.row)
+        .frame(minHeight: 28)
     }
 }
 
@@ -763,18 +752,18 @@ private struct SliderRow: View {
     var set: (Double) -> Void
 
     var body: some View {
-        RunRow(spacing: HT.cw, runIndex: 1, runMin: HT.cw2, leadFraction: 0.6) {
-            Text(label.lowercased())
-                .font(HT.body)
-                .foregroundStyle(HT.inkBright)
+        HStack(spacing: 12) {
+            Text(label)
+                .font(FocusInk.body)
+                .foregroundStyle(FocusInk.text)
                 .fixedSize(horizontal: false, vertical: true)
 
-            GlyphRun(glyph: ".", color: HT.inkFaint)
+            Spacer(minLength: 8)
 
             SegSlider(label: label, value: value, range: range,
                       step: step, grain: grain, readout: readout, onChange: set)
         }
-        .frame(minHeight: HT.row)
+        .frame(minHeight: 28)
     }
 }
 
@@ -792,13 +781,12 @@ private struct SettingsNote: View {
         // of the window. The cap is characters, not a fraction: readability is
         // about line length, and 68 cells is 68 cells at every window size.
         Text(text)
-            .font(HT.body)
+            .font(FocusInk.body)
             .foregroundStyle(HT.inkDim)
-            .lineSpacing(7)
+            .lineSpacing(3)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: HT.cw * 68, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, HT.cw2)
             .padding(.top, HT.s1)
             .padding(.bottom, HT.cw3)
     }

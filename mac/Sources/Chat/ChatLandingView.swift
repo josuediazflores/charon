@@ -1,39 +1,5 @@
 import SwiftUI
 
-/* ── the chat landing ──────────────────────────────────────────────────
-                        [6 sessions ▼]
-     ┌──────────────────────────────────────────────────────────┐
-     │ $ ask about this pi                                      │
-     │                                                          │
-     │              [-DICTATE]  sonnet ▼   high ▼   ┌──────────┐│
-     │                                              │   send   ││
-     └──────────────────────────────────────────────────────────┘
-        an assistant running on the pi · it reads this box and
-             the web, and changes nothing but its own memory
-
-   The front of the chat tab: a box in the middle of a lit pane.
-
-   **The composer is the door.** This route used to be a list with `[+ new]` on
-   it twice, which made starting a conversation a two-step: mint an empty
-   session, land in it, then type. The empty session was a record on the Pi
-   nobody had asked a question of, and it showed up in the list as one. Here the
-   question comes first and the session is minted around it -- so there is no
-   moment at which a thread exists with nothing in it, and no control that says
-   "new" because typing is what new means.
-
-   **The sessions are behind a chip, not in front of the box.** They are the
-   back catalogue: worth a click, not worth the page. The chip carries the count
-   so the number is on screen whether or not the section is, and opening it
-   grows the page downward rather than moving the box.
-
-   **The plate is the one decorative thing in this console and it does not
-   move.** A dithered glow field, painted once per pane size and per ground
-   family, in two of that family's own inks, over a wash that carries a little
-   light the rest of the way down. No timer, no animation, no random number: the
-   page costs exactly nothing while it sits there, which is the whole of the
-   branch it was built on.
-*/
-
 struct ChatLandingView: View {
 
     var model: MailModel
@@ -42,10 +8,7 @@ struct ChatLandingView: View {
     /// took that job -- but the route still exists and still works, because a
     /// window restored onto it has to land somewhere real.
     var fresh: Bool
-    /// The pane is at or under the small breakpoint. Measured by the tab on the
-    /// pane, and passed rather than re-measured: the plate is full-bleed here
-    /// and the margins are the column's, so the two are separate questions about
-    /// the same width.
+    /// Use the compact page margins when the pane reaches the small breakpoint.
     var narrow: Bool
     var navigate: (ChatRoute) -> Void
 
@@ -122,29 +85,6 @@ struct ChatLandingView: View {
     var body: some View {
         page
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            // **The words say where the plate is not.** A caption over a plate
-            // is legible because it puts the plate out -- and on this window
-            // "putting it out" cannot be a patch of void painted over the top:
-            // the console is translucent, so an opaque patch is a rectangle of
-            // darkness on somebody's desktop, plainly a box exactly where the
-            // design wanted nothing at all.
-            //
-            // So the type does not paint anything. Each plated run publishes its
-            // own box, and the boxes are cut out of the plate's mask before the
-            // plate is drawn. What is left under the words is the ground, the
-            // wash and whatever is behind the window, untouched -- which is
-            // what "it only takes the dots out from under the words" means on a
-            // surface that is not opaque. See `htPlated`.
-            .backgroundPreferenceValue(PlateHoles.self) { holes in
-                GeometryReader { geo in
-                    ZStack(alignment: .topLeading) {
-                        wash
-                        plate.mask { plateMask(holes, in: geo) }
-                    }
-                }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
             .htMeasureHeight { paneHeight = $0 }
             // The keymap's own holder, and deliberately not focused on arrival:
             // the field takes the caret, which is the whole point of this page.
@@ -163,66 +103,6 @@ struct ChatLandingView: View {
             // that the collector refused lands back on this route in the same
             // view, and a poll keyed only on the window would never start.
             .task(id: "\(model.active)/\(fresh)") { await poll() }
-    }
-
-    // MARK: - the plate
-
-    /* The wash and the dither, in that order, behind everything.
-
-       **The wash carries the light down and the plate carries the texture.**
-       The glow field is at the top of the pane and gone by its middle, which is
-       right -- but it leaves the box sitting under a band of dots rather than
-       inside a field of light. The wash is what puts it inside one: an ellipse
-       wider than the column, centred above the top edge, at a fifteenth of the
-       one rule colour this family has. Faint enough that it is never a gradient
-       anybody would call a gradient.
-
-       Both are read off the ground family, so all five keep working, and
-       neither one is a hex. */
-    private var plate: some View {
-        DitherPane(ink: HT.inkMid, dim: HT.line)
-            .opacity(0.55)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-    }
-
-    /// The plate's mask: everything, less the box each plated run stands in.
-    ///
-    /// The hole is a `destinationOut` inside the mask's own group and nowhere
-    /// else. Grouped any higher it would clear the alpha of the window itself,
-    /// which is a hole through to the desktop rather than a gap in a texture --
-    /// this file has had that bug once and the group is why it cannot come back.
-    private func plateMask(_ holes: [Anchor<CGRect>], in geo: GeometryProxy) -> some View {
-        Rectangle()
-            .fill(.black)
-            .overlay {
-                ForEach(holes.indices, id: \.self) { i in
-                    let box = geo[holes[i]]
-                    Rectangle()
-                        .frame(width: box.width, height: box.height)
-                        .position(x: box.midX, y: box.midY)
-                        .blendMode(.destinationOut)
-                }
-            }
-            .compositingGroup()
-    }
-
-    private var wash: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            EllipticalGradient(
-                stops: [
-                    Gradient.Stop(color: HT.lineBright.opacity(0.15), location: 0),
-                    Gradient.Stop(color: HT.lineBright.opacity(0), location: 0.76),
-                ],
-                center: .center)
-                // The ending shape stated as a box: 78% of the pane wide and
-                // 92% of it tall, as radii, which is a frame of twice each with
-                // the ellipse inscribed in it.
-                .frame(width: w * 0.78 * 2, height: h * 0.92 * 2)
-                .position(x: w * 0.42, y: -h * 0.08)
-        }
     }
 
     // MARK: - the column
@@ -294,44 +174,29 @@ struct ChatLandingView: View {
 
     // MARK: - the chip
 
-    /* The door to the section, centred over the box, with the plate taken out
-       from under it.
-
-       **The select door hangs off the trailing edge rather than beside it.** The
-       chip is centred and a sibling on its own row would push it off centre, so
-       the one control the section needs up here is laid over the same row at the
-       column's far edge. It is drawn only while the section is open: a mode
-       about rows nobody can see is a mode about nothing. */
     private var chipRow: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                ChatTextButton(text: chip, ink: HT.ink, label: chipLabel) {
-                    showing.toggle()
-                    if !showing { pick.leaveSelect() }
-                }
-                .htPlated()
-                Spacer(minLength: 0)
+        HStack(spacing: 12) {
+            Text("Chat").font(FocusInk.heading(36)).foregroundStyle(FocusInk.text)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            if showing { ChatSelectDoor(pick: pick, empty: mainRows.isEmpty) }
+            Button {
+                showing.toggle()
+                if !showing { pick.leaveSelect() }
+            } label: {
+                Label(chip, systemImage: "clock.arrow.circlepath")
+                    .font(FocusInk.body).foregroundStyle(HT.inkMid)
             }
-
-            if showing {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    ChatSelectDoor(pick: pick, empty: mainRows.isEmpty).htPlated()
-                }
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(chipLabel)
         }
-        .frame(height: HT.row)
-        .padding(.bottom, HT.row)
+        .padding(.bottom, 14)
     }
 
     private var chip: String {
-        // Em dash rather than a zero before the first read: the count is not
-        // nought, it is not known, and the two are different things to somebody
-        // deciding whether to open this.
-        guard let threads else { return "[— sessions ▼]" }
-        let n = threads.filter { $0.archived != true }.count
-        return "[\(n) session\(n == 1 ? "" : "s") \(showing ? "▲" : "▼")]"
+        guard threads != nil else { return "Sessions" }
+        let n = mainRows.count
+        return "\(n) session\(n == 1 ? "" : "s")"
     }
 
     private var chipLabel: String {
@@ -365,10 +230,7 @@ struct ChatLandingView: View {
             seat: .card,
             focusToken: caret,
             onCaret: { typing = $0 })
-        .background {
-            RoundedRectangle(cornerRadius: chatRadius, style: .continuous)
-                .fill(HT.surface2)
-        }
+        .focusCard(border: FocusInk.border)
     }
 
     // MARK: - the section
@@ -394,7 +256,6 @@ struct ChatLandingView: View {
             Spacer(minLength: 0)
             ChatNote("an assistant running on the pi · it reads this box and the web, "
                      + "and changes nothing but its own memory", centred: true)
-                .htPlated()
             Spacer(minLength: 0)
         }
     }
@@ -511,7 +372,7 @@ struct ChatLandingView: View {
     }
 }
 
-// MARK: - type on the plate
+// MARK: - column measurement
 
 /// How tall the composition is. The landing's own, so that the pane's
 /// measurement and the column's cannot reduce into each other.
@@ -519,30 +380,5 @@ private struct ColumnHeight: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = Swift.max(value, nextValue())
-    }
-}
-
-/// Where the plate is not: one box per run of type standing on it, in the
-/// pane's own coordinates. Collected rather than stated, so a sentence that
-/// wrapped onto a second row takes its second row's worth of plate with it.
-private struct PlateHoles: PreferenceKey {
-    static let defaultValue: [Anchor<CGRect>] = []
-    static func reduce(value: inout [Anchor<CGRect>],
-                       nextValue: () -> [Anchor<CGRect>]) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
-private extension View {
-    /// Type standing on the plate, in `DitherPlate`'s own idiom: a caption over
-    /// a plate is legible because it puts the plate out. A cell of clearance
-    /// either side and no vertical padding -- one row of type does not need the
-    /// caption's.
-    ///
-    /// Nothing is painted here. The box is published upward and the plate's
-    /// mask is where it is spent; see `plateMask`.
-    func htPlated() -> some View {
-        padding(.horizontal, HT.cw)
-            .anchorPreference(key: PlateHoles.self, value: .bounds) { [$0] }
     }
 }

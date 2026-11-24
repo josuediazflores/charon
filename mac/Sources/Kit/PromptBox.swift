@@ -76,6 +76,8 @@ struct PromptBox: NSViewRepresentable {
     /// back after arrival bumps this instead. `CommandField`'s own trick, and
     /// ⌘K is the same shape of request.
     var focusToken: Int = 0
+    var inputFont: NSFont? = nil
+    var fieldLabel: String? = nil
     /// Which runs of the text get the box, recomputed from the text itself on
     /// every change. Opt-in and nil by default: a composer that has nothing to
     /// raise pays for nothing, which is why the Jarvis box is unchanged by this
@@ -144,6 +146,7 @@ struct PromptBox: NSViewRepresentable {
             DispatchQueue.main.async { context.coordinator.parent.onCaret?(has) }
         }
         view.delegate = context.coordinator
+        if let fieldLabel { view.setAccessibilityLabel(fieldLabel) }
         view.isRichText = false
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
@@ -165,9 +168,9 @@ struct PromptBox: NSViewRepresentable {
         view.textContainer?.lineFragmentPadding = 0
         view.insertionPointColor = NSColor(HT.prompt)
         view.allowsUndo = true
-        view.font = PromptBox.face
-        view.defaultParagraphStyle = PromptBox.paragraph
-        view.typingAttributes = PromptBox.attributes(disabled: disabled)
+        view.font = inputFont ?? PromptBox.face
+        view.defaultParagraphStyle = inputFont == nil ? PromptBox.paragraph : .default
+        view.typingAttributes = attributes(disabled: disabled)
 
         // The wrapping half of the setup. Without it a text view in a scroller
         // keeps the width it was created at, which here is zero: every line
@@ -185,7 +188,7 @@ struct PromptBox: NSViewRepresentable {
         view.string = text
         view.isEditable = !disabled
         context.coordinator.wasDisabled = disabled
-        PromptBox.paint(view, disabled: disabled, highlight: highlight)
+        paint(view, disabled: disabled, highlight: highlight)
 
         let scroller = NSScrollView()
         scroller.documentView = view
@@ -212,7 +215,7 @@ struct PromptBox: NSViewRepresentable {
         // be reaching into the field while somebody is using it.
         if view.string != text {
             view.string = text
-            PromptBox.paint(view, disabled: disabled, highlight: highlight)
+            paint(view, disabled: disabled, highlight: highlight)
             // The text moved from outside -- the composer clearing itself on a
             // send is the only caller that does this -- so whatever the list
             // was offering was about a token that is no longer there. Setting
@@ -223,8 +226,8 @@ struct PromptBox: NSViewRepresentable {
         if context.coordinator.wasDisabled != disabled {
             context.coordinator.wasDisabled = disabled
             view.isEditable = !disabled
-            view.typingAttributes = PromptBox.attributes(disabled: disabled)
-            PromptBox.paint(view, disabled: disabled, highlight: highlight)
+            view.typingAttributes = attributes(disabled: disabled)
+            paint(view, disabled: disabled, highlight: highlight)
             // A field that cannot be typed into has nothing to complete. The
             // chat composer disables itself for the length of every turn, so
             // this is the ordinary way the list closes as often as it is the
@@ -262,7 +265,7 @@ struct PromptBox: NSViewRepresentable {
     /// it is what un-paints the token that stopped being a tag on the last
     /// keystroke -- and, since the third pass hides a tag's `@`, it is also what
     /// brings that `@` back the instant `@cmo` becomes `@cmoj`.
-    private static func paint(_ view: NSTextView, disabled: Bool,
+    private func paint(_ view: NSTextView, disabled: Bool,
                               highlight: ((String) -> [NSRange])?) {
         guard let storage = view.textStorage else { return }
         let text = view.string
@@ -284,8 +287,8 @@ struct PromptBox: NSViewRepresentable {
         if view.hasMarkedText() { return }
         storage.setAttributes(attributes(disabled: disabled), range: whole)
 
-        let ink = boxed(disabled: disabled)
-        let sigil = hiddenSigil()
+        let ink = Self.boxed(disabled: disabled)
+        let sigil = Self.hiddenSigil()
         for range in tags {
             storage.addAttributes(ink, range: range)
             // The `@`, hidden: clear ink and minus its own advance, so the name
@@ -367,11 +370,11 @@ struct PromptBox: NSViewRepresentable {
         return p
     }
 
-    private static func attributes(disabled: Bool) -> [NSAttributedString.Key: Any] {
+    private func attributes(disabled: Bool) -> [NSAttributedString.Key: Any] {
         [
-            .font: face,
+            .font: inputFont ?? Self.face,
             .foregroundColor: NSColor(disabled ? HT.inkDim : HT.inkBright),
-            .paragraphStyle: paragraph,
+            .paragraphStyle: inputFont == nil ? Self.paragraph : NSParagraphStyle.default,
         ]
     }
 
@@ -591,7 +594,7 @@ struct PromptBox: NSViewRepresentable {
             // highlighter behaves exactly as it did before this parameter
             // existed, down to not being touched on a keystroke at all.
             if let highlight = parent.highlight {
-                PromptBox.paint(view, disabled: parent.disabled, highlight: highlight)
+                parent.paint(view, disabled: parent.disabled, highlight: highlight)
             }
             parent.text = view.string
             requeryLater(view)

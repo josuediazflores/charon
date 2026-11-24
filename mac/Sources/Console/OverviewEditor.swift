@@ -58,6 +58,10 @@ private struct OverviewPage<Content: View>: View {
 
     private var toolbar: some View {
         HStack(spacing: HT.cw) {
+            Text("Overview")
+                .font(FocusInk.heading(38)).tracking(-1)
+                .foregroundStyle(FocusInk.text)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             if let draft {
                 HTButton(title: "Add Widget", action: openLibrary)
@@ -352,13 +356,13 @@ private struct OverviewEditingCell<Content: View>: View {
 
             if let kind = entry.widget {
                 if kind.configurable {
-                    HTButton(title: "Setup", variant: .ghost, nobracket: true, action: configure)
+                    HTButton(title: "Setup", variant: .ghost, action: configure)
                         .modifier(OverviewControlFocus())
                         .accessibilityLabel(Text("Configure \(title)"))
                         .accessibilityIdentifier("overview.configure.\(entry.id)")
                 }
                 HTButton(title: entry.size.title, variant: .ghost, iconAfter: kind.sizes.count > 1 ? "▽" : nil,
-                         nobracket: true, disabled: kind.sizes.count < 2) { sizeOpen = true }
+                         disabled: kind.sizes.count < 2) { sizeOpen = true }
                     .modifier(OverviewControlFocus())
                     .help("Widget width")
                     .accessibilityLabel(Text("Width of \(title)"))

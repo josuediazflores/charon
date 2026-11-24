@@ -65,7 +65,7 @@ enum HT {
 
     // MARK: - ground
     //
-    // A deep blue-gray over a blur of whatever is behind the window. `void` is
+    // The selected ground over a blur of whatever is behind the window. `void` is
     // the colour; the window's own backdrop is the only thing that paints it --
     // once, at the wash the Console settings hold, behind every other view in
     // the app. `groundOpacity` below is where that preference starts. Nothing
@@ -86,11 +86,8 @@ enum HT {
     static var surface3: Color { Ground.current.surface3 }
     static var surface4: Color { Ground.current.surface4 }
 
-    /// How much of the blur the root wash leaves showing, **out of the box**.
-    /// The wash that is actually painted is `ConsoleSettings.groundOpacity`,
-    /// which starts here and is a preference from then on -- so this is the
-    /// design system's answer and not the window's.
-    static let groundOpacity: Double = 0.62
+    /// Start opaque so the desktop cannot tint the dashboard's default graphite.
+    static let groundOpacity: Double = 1
 
     /// The ground again, opaque, for the few places that paint it in order to
     /// **hide** what is behind them rather than to be a background: a menu over
@@ -480,17 +477,10 @@ extension View {
         if dim { foregroundStyle(HT.inkDim) } else { self }
     }
 
-    /// The console page's own margins: sixteen points of row and three cells of
-    /// gutter, dropping to two cells on a narrow pane.
-    ///
-    /// Stated once and used twice. Most tabs are handed to the shell's own
-    /// scroller, which applies this; the chat tab owns its scrolling, because its
-    /// conversation route is a window that has to take the pane rather than grow
-    /// inside a scroller, and it lands on the same margins by using the same
-    /// modifier rather than by copying the numbers.
+    /// Shared page margins for the console scroller and standalone chat pages.
     func htConsolePad(narrow: Bool) -> some View {
-        padding(.vertical, HT.row)
-            .padding(.horizontal, narrow ? HT.cw2 : HT.cw3)
+        padding(.vertical, narrow ? 18 : 26)
+            .padding(.horizontal, narrow ? 18 : 32)
     }
 }
 

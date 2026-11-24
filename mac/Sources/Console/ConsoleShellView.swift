@@ -207,7 +207,9 @@ struct ConsoleShellView: View {
         SidebarView(
             name: "Halftone",
             brandAside: AnyView(
-                IconButton(icon: "<", label: "Hide sidebar", bordered: true, action: toggleSidebar)
+                Button(action: toggleSidebar) { Image(systemName: "sidebar.left") }
+                    .buttonStyle(.plain).foregroundStyle(HT.inkMid)
+                    .accessibilityLabel("Hide sidebar")
                     .help("Hide sidebar (⌥⌘S)")
             ),
             items: settings.availableTabs,
@@ -256,9 +258,11 @@ struct ConsoleShellView: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            IconButton(glyph: .refresh, label: "Refresh", bordered: true) {
-                Task { await model.refresh() }
+            Button { Task { await model.refresh() } } label: {
+                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
             }
+            .buttonStyle(.plain).foregroundStyle(HT.inkMid)
+            .accessibilityLabel("Refresh")
             StatusLamp(level: feedDown ? 0 : 3, of: 3,
                        tone: feedDown ? .fault : .nominal,
                        label: feedDown ? "offline" : "live")
@@ -315,6 +319,8 @@ struct ConsoleShellView: View {
             console { overview }
         } else if tab == ConsoleNav.overnight.id {
             OvernightTasksView(model: model)
+        } else if tab == "jarvis" {
+            JarvisTabView(model: model)
         } else if model.payload == nil {
             console { connecting }
         } else if tab == "mail" {
@@ -348,8 +354,6 @@ struct ConsoleShellView: View {
                 CmoTabView(model: model, payload: payload, feedDown: feedDown,
                            dismissals: dismissals,
                            watchSeen: watchSeen, docsSeen: docsSeen)
-            case "jarvis":
-                JarvisTabView(model: model)
             default:
                 overview
             }

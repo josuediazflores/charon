@@ -131,30 +131,7 @@ final class ConsoleSettings {
     /// spent.
     var scanlines: Bool { didSet { write("scanlines", scanlines) } }
 
-    /// How strongly the picture behind the window is printed. Zero is no
-    /// picture at all.
-    ///
-    /// **Why this is a level and not a switch.** The picture stands where the
-    /// desktop stands, and the first build of it leaned on that: the wash was
-    /// already over the desktop, so surely it was enough over a picture too.
-    /// It is not, and the reason is that the thing it replaces is *blurred*.
-    /// What `underWindowBackground` puts behind this window has almost no local
-    /// contrast left in it, and the ink ramp was measured against exactly that.
-    /// A sharp picture is the opposite: it carries hard edges at full contrast
-    /// straight under the type, and at the wash this console ships with, a lit
-    /// forearm across the rail took the rail's own labels with it.
-    ///
-    /// So the strength is the reader's, on the same 0.05 track the wash uses,
-    /// and it is deliberately not solved for them: where it lands is a matter
-    /// of which picture, which ground and which window, and the honest control
-    /// for a question with four inputs is the one you can watch while you move
-    /// it.
-    ///
-    /// The default out of the box was picked by looking at it rather than
-    /// derived. Under the ground this console ships on, the picture is plainly
-    /// a picture at this level and nothing on the page has given up any
-    /// contrast for it -- the rail still reads, the figures still read. Half
-    /// again as much is where the top bar starts to compete.
+    /// The window artwork is opt-in. At zero the window skips loading the image.
     var backdrop: Double {
         didSet { UserDefaults.standard.set(backdrop, forKey: "backdrop") }
     }
@@ -270,7 +247,7 @@ final class ConsoleSettings {
         let agent = UserDefaults.standard.string(forKey: "messagesAgentThreadId") ?? ""
         messagesAgentThreadId = agent.isEmpty ? "messages-agent" : agent
         scanlines = ConsoleSettings.flag("scanlines", default: false)
-        backdrop = ConsoleSettings.level("backdrop", default: 0.60,
+        backdrop = ConsoleSettings.level("backdrop", default: 0,
                                          in: ConsoleSettings.backdropRange)
         groundOpacity = ConsoleSettings.wash("groundOpacity", default: HT.groundOpacity)
         // Validated by the same reader the token cache initialises itself from,

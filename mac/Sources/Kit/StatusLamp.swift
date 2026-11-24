@@ -11,14 +11,7 @@ import SwiftUI
 enum LampGlyph {
     case triangle, dot, square
 
-    /// The filled and hollow characters, for the two variants the face carries.
-    ///
-    /// `dot` has none, and that is the whole of the distinction: ▲△■□ are in
-    /// Departure Mono and the round pair is not, so a dot run set as text would
-    /// be two circles borrowed from whatever the system substitutes, at another
-    /// weight and off the pixel grid the row beside it sits on. Its pips are
-    /// `PixelGlyph` bitmaps instead. A glyph the face has is always better as a
-    /// character than as a picture of one, and a glyph it lacks is the reverse.
+    /// Text shapes use the bundled mono face. Round indicators are drawn as circles.
     var run: (on: String, off: String)? {
         switch self {
         case .triangle: return ("▲", "△")
@@ -32,9 +25,9 @@ struct StatusLamp: View {
     var level: Int
     var of: Int = 3
     /// Triangles read as signal strength, dots as channel state.
-    var glyph: LampGlyph = .triangle
+    var glyph: LampGlyph = .dot
     var tone: Tone = .default
-    /// Short caps label after the pips.
+    /// Optional state label after the pips.
     var label: String? = nil
 
     private var lit: Int { Swift.max(0, Swift.min(of, level)) }
@@ -49,13 +42,17 @@ struct StatusLamp: View {
                     .foregroundStyle(HT.inkFaint)
             } else {
                 ForEach(0..<Swift.max(0, of), id: \.self) { i in
-                    PixelGlyph(name: i < lit ? .dot : .ring,
-                               color: i < lit ? litInk : HT.inkFaint)
+                    Circle()
+                        .fill(i < lit ? litInk : .clear)
+                        .overlay { Circle().strokeBorder(i < lit ? litInk : HT.inkFaint) }
+                        .frame(width: 5, height: 5)
+                        .padding(.leading, i == 0 ? 0 : 3)
                 }
             }
             if let label {
-                Text(label.uppercased())
-                    .foregroundStyle(HT.inkDim)
+                Text(label.capitalized)
+                    .font(.system(size: 12))
+                    .foregroundStyle(HT.inkMid)
                     .padding(.leading, HT.cw)
             }
         }

@@ -138,12 +138,12 @@ enum GroundFamily: String, CaseIterable, Identifiable {
                                  ink: 0xa9a9a9, inkMid: 0x8e8e8e,
                                  inkDim: 0x7a7a7a, inkFaint: 0x585858)
         case .graphite:
-            return GroundPalette(void: 0x141414, surface2: 0x1b1b1b,
+            return GroundPalette(void: 0x171818, surface2: 0x1e1f1f,
                                  surface3: 0x242424, surface4: 0x2e2e2e,
                                  lineFaint: 0x262626, line: 0x404040,
                                  lineBright: 0x5e5e5e,
-                                 ink: 0xbdbdbd, inkMid: 0xa0a0a0,
-                                 inkDim: 0x8a8a8a, inkFaint: 0x676767)
+                                 ink: 0xc2c2c2, inkMid: 0xa4a4a4,
+                                 inkDim: 0x8e8e8e, inkFaint: 0x6a6a6a)
         case .plum:
             return GroundPalette(void: 0x171320, surface2: 0x1e1929,
                                  surface3: 0x292338, surface4: 0x342d47,
@@ -162,7 +162,7 @@ enum GroundFamily: String, CaseIterable, Identifiable {
     }
 
     /// The one out of the box.
-    static let fallback: GroundFamily = .blueGray
+    static let fallback: GroundFamily = .graphite
 
     /// The five names, in declaration order, for the listbox.
     static let labels: [String] = allCases.map(\.label)

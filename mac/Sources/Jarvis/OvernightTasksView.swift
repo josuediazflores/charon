@@ -35,7 +35,7 @@ private struct OvernightRunList: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         HStack {
-                            Text("Overnight tasks").font(.largeTitle.weight(.semibold))
+                            Text("Overnight tasks").font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                             Spacer()
                             Button { query = PageRequest() } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel("Refresh overnight tasks").disabled(loading)
@@ -54,14 +54,15 @@ private struct OvernightRunList: View {
                         ForEach(runs) { run in
                             Button { selected = run } label: {
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(run.name).font(.title3.weight(.semibold))
+                                    Text(run.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(FocusInk.text)
                                     Text([run.statusLabel, dateLabel(run.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
                                         .font(.callout).foregroundStyle(.secondary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .focusCard().contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            Divider()
                         }
                         if loading { ProgressView().controlSize(.small).accessibilityLabel("Loading overnight tasks") }
                         if let cursor, !loading, error == nil {
@@ -131,7 +132,7 @@ private struct RunReader: View {
             RunColumn { scroll in
                 Button(action: back) { Label("Overnight tasks", systemImage: "arrow.left") }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
-                Text(summary.name).font(.largeTitle.weight(.semibold))
+                Text(summary.name).font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                 if let report {
                     Text([report.statusLabel, dateLabel(report.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.callout).foregroundStyle(.secondary)
@@ -214,7 +215,7 @@ private struct RunFileReader: View {
         RunColumn { scroll in
             Button(action: back) { Label("Back", systemImage: "arrow.left") }.buttonStyle(.plain)
             Text(location.file.label.isEmpty ? location.file.name : location.file.label)
-                .font(.largeTitle.weight(.semibold))
+                .font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
             if let markdown {
                 RunMarkdown(markdown: markdown, run: run, scroll: scroll, location: location, follow: follow)
             } else if let localFile {

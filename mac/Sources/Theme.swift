@@ -27,6 +27,34 @@ extension Color {
     }
 }
 
+enum FocusInk {
+    static let ground = GroundFamily.graphite.palette.void
+    static let card = Color(red: 0.118, green: 0.122, blue: 0.122)
+    static let composer = Color(red: 0.133, green: 0.141, blue: 0.137)
+    static let line = Color(white: 0.21)
+    static let border = Color(white: 0.32)
+    static let secondary = Color(red: 0.67, green: 0.68, blue: 0.65)
+    static let text = Color(red: 0.95, green: 0.94, blue: 0.91)
+    static let sand = Color(red: 0.85, green: 0.74, blue: 0.50)
+
+    static let cardRadius: CGFloat = 11
+    static let body = Font.system(size: 13)
+
+    static func heading(_ size: CGFloat) -> Font {
+        .custom("Iowan Old Style", size: size)
+    }
+
+    static var cardLine: Color { Ground.family == .graphite ? line : HT.line }
+}
+
+extension View {
+    func focusCard(border: Color = FocusInk.cardLine, width: CGFloat = 1) -> some View {
+        let shape = RoundedRectangle(cornerRadius: FocusInk.cardRadius, style: .continuous)
+        return background(HT.surface2, in: shape)
+            .overlay { shape.strokeBorder(border, lineWidth: width).allowsHitTesting(false) }
+    }
+}
+
 enum M {
 
     // MARK: - ground and surfaces
@@ -76,7 +104,7 @@ enum M {
     static let caution = Color(hex: 0xffcc55)  // --ht-caution
     static let fault = Color(hex: 0xff5f4f)    // --ht-fault
     /// Selection. Two call sites in the entire app and no more.
-    static let select = Color(hex: 0x5fdede)   // --ht-signal
+    static let select = FocusInk.sand
     /// The console's focus ring is blue and only ever means focus.
     static let focus = Color(hex: 0x6fb0ff)    // --ht-c12
 
@@ -120,10 +148,10 @@ enum Face {
 
     static let registered: Bool = name != "Menlo"
 
-    /// 11px: everything.
-    static var body: Font { .custom(name, fixedSize: 11) }
-    /// 22px: a subject, and nothing else.
-    static var title: Font { .custom(name, fixedSize: 22) }
+    /// Reading text in Mail and Messages.
+    static var body: Font { FocusInk.body }
+    /// Subject and pane headings.
+    static var title: Font { FocusInk.heading(26) }
 
     static func at(_ size: CGFloat) -> Font { .custom(name, fixedSize: size) }
 

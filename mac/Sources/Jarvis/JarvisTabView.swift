@@ -33,16 +33,6 @@ private let jarvisTextMax = 4000
 /// first eighty characters of a prompt.
 private let jarvisTitleMax = 60
 
-/// How long the transcript takes to fold. 220ms rather than the dialect's 120:
-/// that number is for a colour under a cursor and should feel instant, while
-/// this is a panel the size of the page moving, which at 120ms reads as a glitch
-/// rather than as a fold.
-private let jarvisFold: Double = 0.22
-
-/// The buffer's floor, counted in rows because that is the unit a terminal is
-/// measured in.
-private let jarvisRows = 12
-
 /// Off, speaking as it streams, or reading the finished answer as one take.
 private enum VoiceMode { case off, live, whole }
 
@@ -96,19 +86,13 @@ struct JarvisTabView: View {
     /// return a pre-send record while the send POST is still open.
     @State private var sentBaseline: Int?
 
-    /// The transcript folded away. Not persisted: a fold is about the next
-    /// minute, not about the reader, and a day that reopened collapsed tomorrow
-    /// would be a day whose history you have to remember to ask for.
-    ///
-    /// **Open on arrival.** It was collapsed until asked for, which meant a day
-    /// with five turns in it opened as an orb and an empty box: a page that has
-    /// something to show showing nothing, and a fold to find before it would.
-    /// The record is what the tab is for, so the record is what it opens on.
     @State private var folded = false
-    /// The open transcript's own height, so the fold has two numbers to move
-    /// between. Measured on the content rather than on the frame, which is what
-    /// keeps it true as the day grows.
-    @State private var measured: CGFloat = 0
+    @State private var historyOpen = false
+    @State private var todayID: String?
+    @State private var draft = ""
+    @State private var asJob = false
+    @State private var filing = false
+    @State private var focusToken = 0
 
     @State private var voice: VoiceMode = .off
     @State private var speaker = Speaker()
@@ -122,8 +106,6 @@ struct JarvisTabView: View {
     /// aloud.
     @State private var voiceBase = 0
 
-    @State private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-
     private var today: Bool { day == nil }
 
     private var live: Bool {
@@ -131,27 +113,8 @@ struct JarvisTabView: View {
         return chatInFlight(queued: doc.queued, status: doc.status)
     }
 
-    private var openDay: String? { doc?.day ?? day }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            hero
-            Rule(variant: .bright).padding(.top, HT.row)
-            dayStrip.padding(.top, HT.row)
-            JarvisNote("one conversation a day · jobs run in their own lane "
-                       + "and never block it")
-                .padding(.top, HT.row)
-
-            panel.padding(.top, HT.row)
-            if today { talkRow.padding(.top, HT.row) }
-
-            // The web console prints the jobs disclosure here ("talk reads
-            // only · jobs may write, and every write shows"). Removed at the
-            // user's request 2026-08-19; the job cards remain the place every
-            // write shows.
-        }
-        .frame(maxWidth: chatMeasure, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .center)
+        focusPage
         .task(id: model.connection.baseURL + model.connection.mode.rawValue) {
             speaker.bind(model.store)
         }
@@ -164,74 +127,362 @@ struct JarvisTabView: View {
         .onChange(of: doc) { _, _ in pumpVoice() }
         .onChange(of: voice) { _, _ in pumpVoice() }
         .onDisappear { speaker.cancel() }
-        .onReceive(
-            NSWorkspace.shared.notificationCenter.publisher(
-                for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
-        ) { _ in
-            reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        }
     }
 
-    // MARK: - the hero
+    // The chat owns its viewport so the composer stays reachable on long days.
+    private var atStart: Bool {
+        today && !unreachable && !live && sending == nil && failed == nil
+            && doc?.status != .error && (doc?.turns.isEmpty ?? true)
+            && (doc?.compactions.isEmpty ?? true)
+    }
 
-    /* **The orb is the header, not an ornament in it.** Presence is the one thing
-       on this page that is about the assistant rather than about the
-       conversation, so it gets the top of the page to itself.
+    private var dateLabel: String {
+        let stamp = day ?? doc?.day
+        if let stamp {
+            guard let date = Self.dayFormatter.date(from: stamp) else { return stamp }
+            return date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        }
+        return Date().formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
 
-       **Colour says what he is DOING, and never who he is.** (2026-08-24; it
-       was "one colour, always" before that.) The old ban was on tone-as-
-       identity: a sphere that is red because it happens to be Jarvis makes a
-       real red harder to trust. This is the reserved counterpart, colour-as-
-       doing: gold at rest because gold is Jarvis, blue while a turn of his is
-       in flight, red only when something has actually failed -- which is red
-       AGREEING with the console's fault vocabulary rather than borrowing it.
-       The orb still cannot be the only channel -- it is hidden from assistive
-       tech and it is one hue in a 1-bit render -- so the word underneath
-       remains the state's non-colour channel, in the same neutral ink as
-       always. The mapping lives on `Presence`, beside the word and the
-       activity, so the three can never disagree.
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
-       **The sphere is a GPU fluid now, not a character grid.** Picked by the
-       user on 2026-08-23; the preset, its provenance and the Bayer screen that
-       prints it are documented in `LiquidOrb.metal`. Nothing above changes: it
-       is the same size, the same one colour and the same `activity`, and
-       `OrbView` still draws it on any Mac that cannot start the renderer. */
-    private var hero: some View {
+    private var focusPage: some View {
         VStack(spacing: 0) {
-            LiquidOrbView(activity: presence.activity, ink: presence.ink,
-                          label: "Jarvis is \(presence.word)")
-                .padding(.bottom, HT.row)
+            HStack(spacing: 9) {
+                Image(systemName: "sparkle").foregroundStyle(HT.c11)
+                Text("Jarvis").foregroundStyle(FocusInk.secondary)
+                Text("/").foregroundStyle(FocusInk.line)
+                Text("Conversation")
+                Spacer()
+                if presence.word != "idle" {
+                    Text(presence.word.capitalized).foregroundStyle(presence.ink)
+                }
+                Button {
+                    historyOpen = true
+                } label: { Label("History", systemImage: "clock.arrow.circlepath") }
+                .foregroundStyle(FocusInk.secondary)
+                .accessibilityLabel("Conversation history")
+                .popover(isPresented: $historyOpen, arrowEdge: .bottom) { historyList }
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 22)
+            .frame(height: 47)
+            Divider().overlay(FocusInk.line)
 
-            Text("JARVIS")
-                .font(HT.lead)
-                .tracking(22 * 0.08)
-                .foregroundStyle(HT.inkBright)
-                .frame(height: HT.row2)
-
-            Text(presence.word)
-                .font(HT.body)
-                .foregroundStyle(HT.inkMid)
-                .frame(height: HT.row)
-
-            heroMeta.padding(.top, HT.s1)
+            if atStart {
+                GeometryReader { geometry in
+                    let size = geometry.size
+                    let compact = size.height < 440
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ZStack {
+                                FocusOrbits()
+                                orb(scale: compact ? 0.49 : 0.79)
+                            }
+                            .frame(maxWidth: 470)
+                            .frame(height: compact ? 72 : (size.height < 540 ? 106 : 140))
+                            dateText.padding(.top, compact ? 6 : 13)
+                            Text("What’s on your mind?")
+                                .font(FocusInk.heading(compact ? 34 : (size.width < 650 ? 39 : 56)))
+                                .tracking(-2)
+                                .minimumScaleFactor(0.7)
+                                .lineLimit(1)
+                                .padding(.top, 5)
+                                .padding(.bottom, compact ? 12 : 23)
+                            composer
+                            HStack(spacing: 9) {
+                                starter("Catch me up", "Review the overnight work.", "sunrise", compact: compact) {
+                                    if draft.isEmpty { draft = "Catch me up on the overnight work." }
+                                    asJob = false
+                                    focusToken += 1
+                                }
+                                starter("Revisit a day", "Open a past conversation.", "clock.arrow.circlepath", compact: compact) {
+                                    historyOpen = true
+                                }
+                                starter("Hand off a task", "Give Jarvis a background job.", "briefcase", compact: compact) {
+                                    asJob = true
+                                    focusToken += 1
+                                }
+                            }
+                            .padding(.top, compact ? 8 : 13)
+                        }
+                        .frame(maxWidth: 760)
+                        .padding(.horizontal, size.width < 650 ? 22 : 34)
+                        .padding(.vertical, compact ? 8 : 20)
+                        .frame(maxWidth: .infinity, minHeight: size.height)
+                    }
+                }
+            } else {
+                conversation
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, HT.row2)
-        .padding(.bottom, HT.row)
+        .buttonStyle(.plain)
+        .foregroundStyle(FocusInk.text)
+        .background(FocusInk.ground)
     }
 
-    private var heroMeta: some View {
-        HStack(alignment: .firstTextBaseline, spacing: HT.cw) {
-            Text(openDay ?? "—").font(HT.body).foregroundStyle(HT.inkFaint)
-            if today {
-                Text("· today").font(HT.body).foregroundStyle(HT.inkFaint)
-            } else {
-                ChatTextButton(text: "· ◂ back to today", ink: HT.inkMid) { day = nil }
+    private func orb(scale: CGFloat) -> some View {
+        LiquidOrbView(activity: presence.activity, ink: presence.ink, label: "Jarvis is \(presence.word)")
+            .scaleEffect(scale)
+            .frame(width: 196 * scale, height: 198 * scale)
+    }
+
+    private var dateText: some View {
+        Text(dateLabel.uppercased())
+            .font(.custom("Departure Mono", size: 10)).tracking(1.1)
+            .foregroundStyle(FocusInk.sand)
+    }
+
+    private func starter(_ title: String, _ detail: String, _ symbol: String, compact: Bool,
+                         action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Image(systemName: symbol).foregroundStyle(FocusInk.sand)
+                    Spacer()
+                    Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(FocusInk.secondary)
+                }.padding(.bottom, compact ? 0 : 5)
+                Text(title).font(.system(size: 14, weight: .medium))
+                if !compact {
+                    Text(detail).font(.system(size: 12)).foregroundStyle(FocusInk.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if let doc {
-                Text("· \(Fmt.relTime(doc.updatedAt, now: model.now))")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkFaint)
+            .frame(maxWidth: .infinity, minHeight: compact ? 30 : 64, alignment: .topLeading)
+            .padding(compact ? 9 : 13)
+            .background(FocusInk.card, in: RoundedRectangle(cornerRadius: FocusInk.cardRadius))
+            .overlay { RoundedRectangle(cornerRadius: FocusInk.cardRadius).strokeBorder(FocusInk.line) }
+            .contentShape(Rectangle())
+        }.accessibilityLabel(title)
+    }
+
+    private var historyList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Conversation history").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    historyRow(nil, title: "Today", detail: "Current conversation")
+                    ForEach(rows ?? []) { row in
+                        if row.day != todayID {
+                            let activity = chatInFlight(queued: row.queued, status: row.status)
+                                ? "Running" : (row.status == .error ? "Failed" : "")
+                            historyRow(row.day, title: row.day, detail: [activity, row.preview]
+                                .filter { !$0.isEmpty }.joined(separator: " · "))
+                        }
+                    }
+                    if rows == nil { Text("History unavailable").font(.caption).padding(8) }
+                    else if rows?.allSatisfy({ $0.day == todayID }) == true {
+                        Text("No earlier conversations").font(.caption).padding(8)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 305, height: 300)
+    }
+
+    private func historyRow(_ key: String?, title: String, detail: String) -> some View {
+        Button {
+            historyOpen = false
+            guard key != day else { return }
+            speaker.cancel()
+            day = key
+            doc = nil
+            missing = false
+            unreachable = false
+            jobs = nil
+            folded = false
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 13, weight: .medium))
+                    if !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+                if day == key { Image(systemName: "checkmark") }
+            }.padding(8).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var conversation: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    dateText
+                    Text(today ? "Today’s conversation" : "Archived conversation")
+                        .font(.custom("Iowan Old Style", size: 32)).tracking(-1)
+                }
+                Spacer()
+                if !missing && !unreachable {
+                    Button {
+                        folded.toggle()
+                    } label: {
+                        Image(systemName: folded ? "chevron.down" : "chevron.up")
+                    }
+                    .accessibilityLabel(folded ? "Expand the transcript" : "Collapse the transcript")
+                    .help(folded ? "Expand transcript" : "Collapse transcript")
+                    .foregroundStyle(FocusInk.secondary)
+                }
+                orb(scale: 0.34)
+            }
+            Divider().overlay(FocusInk.line)
+            if folded {
+                Spacer()
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if missing { Text("No saved conversation for this day.").padding(.vertical) }
+                            else if unreachable { Text("The collector is unavailable.").padding(.vertical) }
+                            else if !today && doc == nil { ProgressView().controlSize(.small).padding() }
+                            else {
+                                JarvisTranscript(doc: doc, jobs: jobs, sending: today ? sending : nil,
+                                                 failed: today ? failed : nil, readOnly: !today,
+                                                 onCompact: { Task { await compact() } },
+                                                 onStopJob: { id in Task { await stopJob(id) } })
+                            }
+                            Color.clear.frame(height: 1).id("end")
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: sending) { _, newValue in
+                        if newValue != nil && today { proxy.scrollTo("end", anchor: .bottom) }
+                    }
+                    .onAppear { if today { proxy.scrollTo("end", anchor: .bottom) } }
+                }
+            }
+            if today { composer.padding(.top, 10) }
+            else {
+                HStack {
+                    Text("Read only").foregroundStyle(FocusInk.secondary)
+                    Spacer()
+                    Button("Back to today") {
+                        day = nil
+                        doc = nil
+                        missing = false
+                        folded = false
+                    }
+                }.font(.system(size: 13)).padding(.vertical, 10)
+            }
+        }
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text(asJob ? "Describe a job for Jarvis…" : "Ask Jarvis anything…")
+                        .foregroundStyle(FocusInk.secondary)
+                        .font(.system(size: 16))
+                        .allowsHitTesting(false)
+                }
+                PromptBox(text: $draft, maxLength: jarvisTextMax, disabled: unreachable,
+                          focusToken: focusToken, inputFont: .systemFont(ofSize: 16),
+                          fieldLabel: "Message Jarvis",
+                          onSubmit: submit)
+            }.frame(height: 50)
+            HStack(spacing: 12) {
+                Menu {
+                    Section("Model") {
+                        Picker("Model", selection: Binding(get: { doc?.model ?? .sonnet }, set: { m in Task { await changeModel(m) } })) {
+                            ForEach(JarvisModelName.allCases, id: \.self) { value in Text(value.rawValue.capitalized).tag(value) }
+                        }
+                    }
+                    Section("Effort") {
+                        Picker("Effort", selection: Binding(get: { doc?.effort ?? .medium }, set: { e in Task { await changeEffort(e) } })) {
+                            ForEach(JarvisEffort.allCases, id: \.self) { value in Text(value.rawValue.capitalized).tag(value) }
+                        }
+                    }
+                    Divider()
+                    ContextMeter(ctx: doc?.context)
+                } label: {
+                    Label((doc?.model ?? .sonnet).rawValue.capitalized, systemImage: "slider.horizontal.3")
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(unreachable || live || sending != nil)
+                .accessibilityLabel("Response settings")
+                Button {
+                    asJob.toggle()
+                    focusToken += 1
+                } label: { Label("As job", systemImage: asJob ? "checkmark.circle.fill" : "briefcase") }
+                .foregroundStyle(asJob ? HT.c11 : FocusInk.secondary)
+                .accessibilityValue(asJob ? "On" : "Off")
+                .disabled(unreachable || filing)
+                Spacer(minLength: 2)
+                if draft.count > 3750 { Text("\(draft.count)/4000").font(.caption2) }
+                if live {
+                    Button("Stop") { Task { await stop() } }.foregroundStyle(FocusInk.sand)
+                }
+                Button(action: toggleVoice) {
+                    Image(systemName: voice == .off ? "speaker" : "speaker.wave.2.fill")
+                        .frame(width: 22, height: 28)
+                }
+                .foregroundStyle(voice == .off ? FocusInk.secondary : FocusInk.sand)
+                .accessibilityLabel("Spoken replies")
+                .accessibilityValue(voiceLabel)
+                .help("Spoken replies: \(voiceLabel). Click to cycle.")
+                Button(action: submit) {
+                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(FocusInk.ground)
+                        .frame(width: 32, height: 32)
+                        .background(canSubmit ? HT.c11 : FocusInk.sand, in: Circle())
+                }
+                .accessibilityLabel(asJob ? "Run as job" : "Send message")
+                .disabled(!canSubmit)
+            }
+            .font(.system(size: 12))
+            if filing || (voice != .off && speaker.unavailable) {
+                Text(filing ? "Filing job…" : "Spoken replies unavailable").font(.caption)
+            }
+        }
+        .padding(16)
+        .background(FocusInk.composer, in: RoundedRectangle(cornerRadius: 15))
+        .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(FocusInk.border) }
+    }
+
+    private var voiceLabel: String {
+        switch voice {
+        case .off: return "Off"
+        case .live: return "As replies arrive"
+        case .whole: return "After each reply"
+        }
+    }
+
+    private var canSubmit: Bool {
+        today && !unreachable && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (asJob ? !filing : (!live && sending == nil))
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        let original = draft
+        let text = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        if asJob {
+            filing = true
+            let title = String(text.prefix(while: { !$0.isNewline }).prefix(jarvisTitleMax))
+            Task {
+                let filed = await file(text, title)
+                filing = false
+                if filed && draft == original { draft = ""; asJob = false }
+            }
+        } else {
+            sending = text
+            draft = ""
+            Task {
+                let accepted = await send(text)
+                if !accepted && draft.isEmpty { draft = original }
             }
         }
     }
@@ -269,251 +520,6 @@ struct JarvisTabView: View {
         if working { return Presence(word: "working", activity: 0.3) }
         if doc?.status == .error { return Presence(word: "failed", activity: 0.12, ink: HT.c9) }
         return Presence(word: "idle", activity: 0.05)
-    }
-
-    // MARK: - the days
-
-    /// Every day there is a record for, as one row of chips.
-    ///
-    /// **A strip rather than a page.** Today is the landing page and is where all
-    /// six writes go; an earlier day is somewhere you look something up. A list
-    /// route would have made the reader pick a conversation before they could say
-    /// anything to the one that is live.
-    @ViewBuilder
-    private var dayStrip: some View {
-        if rows == nil {
-            JarvisNote("the days are on the pi · not read yet")
-        } else if rows?.isEmpty ?? true {
-            JarvisNote("no earlier days")
-        } else {
-            ScrollView(.horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: HT.cw2) {
-                    ForEach(rows ?? []) { row in
-                        DayChip(row: row, open: row.day == openDay) { day = row.day }
-                    }
-                }
-                .padding(.bottom, HT.s1)
-            }
-            .accessibilityLabel(Text("Days"))
-        }
-    }
-
-    // MARK: - the panel
-
-    /* **A panel, not a window, and the reason is one glyph.** A title bar always
-       draws all three boxes and disables the ones with no handler, so wiring only
-       the fold would leave two dead controls sitting beside the live one. Two
-       thirds of that chrome was furniture on a page whose subject is a
-       conversation rather than a running process. This is the same frame without
-       the window dressing: the label, and one arrow that does the only thing this
-       panel does.
-
-       Folding hides the history and NOTHING else -- the composer stays, because
-       the reason to fold a long day away is usually to get a clean screen to type
-       into, and a fold that took the input with it is a fold nobody uses twice. */
-    private var panel: some View {
-        VStack(spacing: 0) {
-            head
-            VStack(spacing: 0) {
-                collapse
-                if today { composer } else { closed }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay { PanelBodyFrame().stroke(HT.inkDim, lineWidth: 1) }
-        }
-    }
-
-    private var head: some View {
-        HStack(spacing: HT.cw) {
-            Text("TRANSCRIPT")
-                .font(HT.body)
-                .foregroundStyle(HT.inkBright)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            // The count moves into the bar when the body is away, so folding
-            // costs no information.
-            if folded, sayCount > 0 {
-                Text("· \(sayCount) \(sayCount == 1 ? "turn" : "turns")")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkMid)
-                    .fixedSize()
-            }
-
-            // `▲`/`▼` and not `▸`, which is not in Departure Mono at all. The
-            // arrow says what the click will DO rather than what the state is.
-            ChatTextButton(text: folded ? "▼" : "▲", ink: HT.inkMid,
-                           label: folded ? "Expand the transcript" : "Collapse the transcript") {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: jarvisFold)) {
-                    folded.toggle()
-                }
-            }
-            .frame(width: HT.cw3)
-        }
-        .padding(.leading, HT.cw)
-        .padding(.trailing, HT.s1)
-        .frame(height: HT.row2)
-        .background(Color.clear)
-        .overlay { Rectangle().strokeBorder(HT.inkDim, lineWidth: 1) }
-    }
-
-    /// The body stays mounted and is clipped rather than unmounted, so the scroll
-    /// position survives a fold and the transcript does not have to be rebuilt on
-    /// the way back.
-    private var collapse: some View {
-        buffer
-            .htMeasureHeight { height in if height > 0 { measured = height } }
-            .frame(height: folded ? 0 : (measured > 0 ? measured : nil), alignment: .top)
-            .clipped()
-    }
-
-    @ViewBuilder
-    private var buffer: some View {
-        if missing {
-            bufferNote("no record for this day on the pi.")
-        } else if unreachable {
-            // Said out loud rather than drawn as a quiet day. The composer below
-            // is disabled off the same flag, because a box you can type into over
-            // a Pi that is not answering is a message that goes nowhere and says
-            // it went.
-            bufferNote("the collector is not answering · today is on the pi, not here")
-        } else {
-            JarvisTranscript(
-                doc: doc, jobs: jobs, sending: sending, failed: failed,
-                onCompact: { Task { await compact() } },
-                onStopJob: { id in Task { await stopJob(id) } })
-                .frame(minHeight: CGFloat(jarvisRows) * HT.row, alignment: .topLeading)
-        }
-    }
-
-    private func bufferNote(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            JarvisNote(text)
-            Spacer(minLength: 0)
-        }
-        .frame(minHeight: HT.row * 6, alignment: .topLeading)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, HT.cw2)
-        .padding(.top, HT.row)
-    }
-
-    /// Turns a reader would call turns. Job cards and notice lines are in the
-    /// same array and are not things anybody said, so they are not counted on the
-    /// folded row.
-    private var sayCount: Int {
-        (doc?.turns ?? []).reduce(0) { n, turn in
-            if case .say = turn { return n + 1 }
-            return n
-        }
-    }
-
-    // MARK: - the composer
-
-    private var composer: some View {
-        JarvisComposer(
-            busy: live || sending != nil,
-            offline: unreachable,
-            busyReason: unreachable ? "the collector is not answering" : busyReason,
-            model: doc?.model ?? .sonnet,
-            // Shown as `medium` when the record names nothing, because that is
-            // what the CLI does by default -- but nothing is written until a
-            // choice is made, so an untouched day never claims a level it did not
-            // run with.
-            effort: doc?.effort ?? .medium,
-            ctx: doc?.context,
-            onStop: live ? { Task { await stop() } } : nil,
-            onSend: { text in Task { await send(text) } },
-            onJob: { text, title in await file(text, title) },
-            onModel: { m in Task { await changeModel(m) } },
-            onEffort: { e in Task { await changeEffort(e) } })
-    }
-
-    private var busyReason: String? {
-        if sending != nil { return "filing…" }
-        if doc?.queued == true { return "queued · the runner has not picked this up yet" }
-        if doc?.status == .running {
-            return "answering · [stop] to give up on it · jobs still file"
-        }
-        return nil
-    }
-
-    /// No composer at all rather than a disabled one. Nothing can be written to
-    /// an earlier day -- not because it is locked, but because every write route
-    /// in the contract means today.
-    private var closed: some View {
-        HStack(spacing: 0) {
-            Text("an earlier day · reading only · ")
-                .font(HT.body)
-                .foregroundStyle(HT.inkMid)
-            ChatTextButton(text: "today", ink: HT.inkMid) { day = nil }
-            Text(" is where you can type")
-                .font(HT.body)
-                .foregroundStyle(HT.inkMid)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, HT.cw2)
-        .padding(.vertical, HT.row)
-        .overlay(alignment: .top) { Rectangle().fill(HT.lineFaint).frame(height: 1) }
-    }
-
-    // MARK: - the talk row
-
-    /* **Talk lives outside the panel, on its own.** It was a fourth control in
-       the composer row, which made the most physical thing on the page look like
-       a setting. It is also not part of the transcript: the transcript is the
-       record, and this is a way of putting words into the box.
-
-       **The mic is deferred** (SPEC-CMO decision 1). The web's own button is
-       blocked in production anyway -- the Pi serves that page over plain http and
-       the browser refuses to open a microphone outside a secure context -- so
-       rather than port a control that cannot work, the row keeps only the half
-       that does: voice OUT. The row used to carry the words "dictation not
-       built yet" beside the toggle, which is a note about this program's
-       backlog rather than anything the reader can act on; a control that is not
-       there is not a control anybody is looking for. */
-    private var talkRow: some View {
-        HStack(spacing: HT.cw2) {
-            voiceButton
-
-            if voice != .off, speaker.unavailable {
-                // The Mac is asleep or tts is not configured: a dim word, never a
-                // fault tone. The text lane is whole and the answer is on screen,
-                // so nothing here needs looking into -- red would be an alarm
-                // about an amenity.
-                Text("voice unavailable")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkMid)
-                    .fixedSize()
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// `◌` and `•`, both confirmed in Departure Mono at a true 7px advance, and
-    /// the word changes with them, so the toggle survives 1-bit. Ink, never cyan:
-    /// a setting, not the act that puts a message in the day.
-    private var voiceButton: some View {
-        let on = voice != .off
-        let label = voice == .off ? "◌ voice" : voice == .live ? "• voice live" : "• voice whole"
-        return Button(action: toggleVoice) {
-            Text(label)
-                .font(HT.body)
-                .foregroundStyle(on ? HT.inkBright : HT.ink)
-                .padding(.horizontal, HT.cw2)
-                .frame(height: HT.row2)
-                .overlay {
-                    Rectangle().strokeBorder(on ? HT.inkBright : HT.lineBright, lineWidth: 1)
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .accessibilityLabel(Text(label))
-        .help(voice == .off
-              ? "speak answers as they stream"
-              : voice == .live ? "wait and read the whole answer at the end" : "voice off")
     }
 
     /// off → live → whole → off, one button.
@@ -619,11 +625,13 @@ struct JarvisTabView: View {
     }
 
     private func load() async {
+        let requestedDay = day
         do {
             let got = today
                 ? try await model.store.jarvisToday()
                 : try await model.store.jarvisDay(day ?? "")
-            if Task.isCancelled { return }
+            guard !Task.isCancelled, day == requestedDay else { return }
+            if today { todayID = got?.day ?? Self.dayFormatter.string(from: Date()) }
             doc = got
             // A 404 is a fact about the date and a transport failure is not.
             // Today can never be missing -- the collector mints it -- so this
@@ -633,7 +641,7 @@ struct JarvisTabView: View {
             // different sentence from "nothing has been said today" and must not
             // be drawn as it.
             unreachable = (got == nil && today)
-            if let got, let baseline = sentBaseline, askCount(got) > baseline {
+            if today, let got, let baseline = sentBaseline, askCount(got) > baseline {
                 sending = nil
                 sentBaseline = nil
             }
@@ -642,12 +650,15 @@ struct JarvisTabView: View {
             // second route once a second for a list it will not draw.
             if let got, got.turns.contains(where: { if case .job = $0 { return true }
                                                     return false }) {
-                jobs = await model.store.jarvisJobs()
+                let records = await model.store.jarvisJobs()
+                if !Task.isCancelled && day == requestedDay { jobs = records }
             }
         } catch is CancellationError {
             return
         } catch {
-            if !Task.isCancelled { missing = false }
+            guard !Task.isCancelled, day == requestedDay else { return }
+            unreachable = true
+            missing = false
         }
     }
 
@@ -674,7 +685,7 @@ struct JarvisTabView: View {
         return result == .ok
     }
 
-    private func send(_ text: String) async {
+    private func send(_ text: String) async -> Bool {
         failed = nil
         // Barge-in: a filed question ends the previous answer's voice mid-word,
         // and -- while voice is on -- warms the Mac for the reply now coming.
@@ -685,7 +696,9 @@ struct JarvisTabView: View {
         if await settle(await model.store.jarvisSay(text: text), "not sent") == false {
             sending = nil
             sentBaseline = nil
+            return false
         }
+        return true
     }
 
     /// Filing work. **The one write that is never refused**, so a failure here is
@@ -730,254 +743,23 @@ struct JarvisTabView: View {
     }
 }
 
-// MARK: - the day chip
-
-/// A glyph and a word for anything that is not a quiet day: a strip of dates told
-/// apart by hue alone would say nothing at all on a monochrome screen, and the
-/// word is the channel that survives.
-///
-/// **The open day is not cyan.** The accent is spent on send; this one is
-/// bracketed and bright, which is a shape and a weight rather than a hue.
-private struct DayChip: View {
-    var row: JarvisDaySummary
-    var open: Bool
-    var go: () -> Void
-
-    @State private var hovering = false
-
+private struct FocusOrbits: View {
     var body: some View {
-        Button(action: go) {
-            HStack(spacing: HT.s1) {
-                if chatInFlight(queued: row.queued, status: row.status) {
-                    Text("›").foregroundStyle(HT.caution)
-                }
-                if row.status == .error {
-                    Text("×").foregroundStyle(HT.fault)
-                }
-                // `MM-DD`, taken by slicing, which is safe for exactly one
-                // reason: a day id is already a local calendar day and not an
-                // instant, so nothing here can name yesterday in the wrong
-                // timezone the way slicing a timestamp would.
-                Text(open ? "[\(short)]" : short)
-                    .foregroundStyle(open || hovering ? HT.inkBright : HT.inkMid)
+        Canvas { ctx, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.rotate(by: .degrees(-9))
+            for (width, height, dashed) in [(0.92, 0.58, true), (0.77, 0.46, false), (0.55, 0.34, false)] {
+                let w = size.width * width, h = size.height * height
+                let path = Path(ellipseIn: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+                ctx.stroke(path, with: .color(dashed ? FocusInk.line : Color(red: 0.34, green: 0.31, blue: 0.22)),
+                           style: StrokeStyle(lineWidth: 0.7, dash: dashed ? [1, 4] : []))
             }
-            .font(HT.body)
-            .lineLimit(1)
-            .fixedSize()
-            .contentShape(Rectangle())
+            for (x, y) in [(-0.34, 0.09), (0.35, -0.09), (-0.41, -0.22), (0.29, 0.43)] {
+                let dot = CGRect(x: x * size.width, y: y * size.height, width: 2.4, height: 2.4)
+                ctx.fill(Path(ellipseIn: dot), with: .color(FocusInk.sand))
+            }
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { hovering = $0 }
-        .accessibilityLabel(Text(accessibility))
-    }
-
-    private var short: String {
-        row.day.count >= 10 ? String(row.day.dropFirst(5)) : row.day
-    }
-
-    private var accessibility: String {
-        if chatInFlight(queued: row.queued, status: row.status) { return "\(row.day) running" }
-        if row.status == .error { return "\(row.day) failed" }
-        return row.day
-    }
-}
-
-// MARK: - the composer
-
-/* The input line: one box, two lanes, and the difference stated out loud.
- *
- * Shaped after the chat composer -- a `$` sigil, a field reset to inherit
- * everything, Enter sends and Shift+Enter is a newline. It departs from it in
- * exactly one way, and that way is the feature this page exists for.
- *
- * **The field is not disabled while a turn is in flight.** The say route answers
- * 409 then and the job route never does, so the honest disabled control is
- * `send`, alone. Greying the box wholesale -- which a one-lane conversation must
- * -- would hide the work lane at precisely the moment it is worth reaching for.
- */
-private struct JarvisComposer: View {
-
-    /// A turn is in flight: `send` is refused and the model has already been read
-    /// off the record by the runner.
-    var busy: Bool
-    /// **The collector did not answer, and this is not `busy`.** Offline is the
-    /// case where neither lane can be reached, so every control here writes to a
-    /// Pi that is not listening. The field itself goes dead, which is the one
-    /// state where that is the honest thing to do.
-    var offline: Bool
-    var busyReason: String?
-    var model: JarvisModelName
-    var effort: JarvisEffort
-    var ctx: JarvisContext?
-    var onStop: (() -> Void)?
-    var onSend: (String) -> Void
-    /// Resolves true when the collector took the job, which is when the box is
-    /// cleared. **Not the optimistic path `send` takes**: a filed job comes back
-    /// as a card within the second, so there is nothing worth drawing in the
-    /// meantime.
-    var onJob: (String, String) async -> Bool
-    var onModel: (JarvisModelName) -> Void
-    var onEffort: (JarvisEffort) -> Void
-
-    @State private var text = ""
-    @State private var filing = false
-
-    private var message: String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: HT.cw) {
-                Text("$")
-                    .font(HT.body)
-                    .foregroundStyle(HT.prompt)
-                    .frame(height: HT.row)
-                ZStack(alignment: .topLeading) {
-                    if text.isEmpty && !offline {
-                        Text("ask jarvis, or file it as a job")
-                            .font(HT.body)
-                            .foregroundStyle(HT.inkFaint)
-                            .frame(height: HT.row)
-                            .allowsHitTesting(false)
-                    }
-                    PromptBox(text: $text, maxLength: jarvisTextMax, disabled: offline,
-                              onSubmit: submit)
-                        .accessibilityLabel(Text("Message Jarvis"))
-                }
-                .frame(height: HT.row * 2)
-            }
-
-            // The budget line: how much room is left in the box, then how much is
-            // left in the day. One thing read at two scales, which is why the
-            // meter is here and not in a panel of its own.
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text(busyReason ?? "\(text.count)/\(jarvisTextMax) · enter sends")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkMid)
-                Text(" · ").font(HT.body).foregroundStyle(HT.inkMid)
-                ContextMeter(ctx: ctx)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, HT.s2)
-
-            controls.padding(.top, HT.cw)
-        }
-        .padding(.horizontal, HT.cw2)
-        .padding(.vertical, HT.row)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) { Rectangle().fill(HT.lineFaint).frame(height: 1) }
-    }
-
-    private var controls: some View {
-        HStack(alignment: .center, spacing: HT.cw2) {
-            // Which model answers, and how hard it thinks. Both are settings
-            // rather than acts, and both are refused while a turn is in flight
-            // because the runner has already read the record to build its argv.
-            Listbox(label: "Model", value: model.rawValue,
-                    options: JarvisModelName.allCases.map(\.rawValue),
-                    disabled: busy || offline) { picked in
-                onModel(JarvisModelName(rawValue: picked) ?? .sonnet)
-            }
-
-            Listbox(label: "Effort", value: effort.rawValue,
-                    options: JarvisEffort.allCases.map(\.rawValue),
-                    disabled: busy || offline) { picked in
-                onEffort(JarvisEffort(rawValue: picked) ?? .medium)
-            }
-
-            Spacer(minLength: 0)
-
-            // **Live whatever the talk lane is doing.** The work lane has its own
-            // spool, its own lock and its own runner, and the job route never
-            // answers 409 -- so this control is never refused, and drawing it as
-            // though it could be would be a lie about the one thing that makes
-            // two lanes worth having. Ink and not cyan.
-            ChatTextButton(text: filing ? "[filing…]" : "[run as job]",
-                           ink: (message.isEmpty || filing || offline) ? HT.inkFaint : HT.ink) {
-                guard !message.isEmpty, !filing, !offline else { return }
-                Task { await fileJob() }
-            }
-
-            if let onStop {
-                ChatTextButton(text: "[stop]", ink: HT.inkMid, hoverInk: HT.caution,
-                               action: onStop)
-            }
-
-            sendButton
-        }
-    }
-
-    /// **The page's single cyan spend.** The one thing here worth calling this
-    /// one is the act that puts a message in the day's conversation. Everything
-    /// else on this page is ink, green, amber or red.
-    private var sendButton: some View {
-        let enabled = !busy && !message.isEmpty && !offline
-        return Button(action: submit) {
-            Text("send")
-                .font(HT.body)
-                .foregroundStyle(enabled ? HT.void : HT.inkDim)
-                .padding(.horizontal, HT.cw2)
-                .frame(height: HT.row2)
-                .background(enabled ? HT.signal : Color.clear)
-                .overlay { Rectangle().strokeBorder(enabled ? HT.signal : HT.line, lineWidth: 1) }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .disabled(!enabled)
-    }
-
-    private func submit() {
-        guard !message.isEmpty, !busy, !offline else { return }
-        let outgoing = message
-        text = ""
-        onSend(outgoing)
-    }
-
-    private func fileJob() async {
-        // The first line, cut to a label. The whole prompt goes to the runner
-        // either way.
-        let title = String((message.split(separator: "\n", maxSplits: 1,
-                                          omittingEmptySubsequences: false).first ?? "")
-            .trimmingCharacters(in: .whitespaces)
-            .prefix(jarvisTitleMax))
-        filing = true
-        let filed = await onJob(message, title)
-        filing = false
-        if filed { text = "" }
-    }
-}
-
-// MARK: - the small parts
-
-/// A sentence about the page, never a control. `ink-mid` and not `ink-dim`:
-/// every demotion in this dialect stops at the contrast floor, because
-/// everything demoted here is a word rather than a rule.
-struct JarvisNote: View {
-    var text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(HT.body)
-            .foregroundStyle(HT.inkMid)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// The frame with no top edge: the head's own bottom rule is the one between
-/// them, and two rules there would be two pixels where the design has one.
-private struct PanelBodyFrame: Shape {
-    func path(in rect: CGRect) -> Path {
-        let r = rect.insetBy(dx: 0.5, dy: 0.5)
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        return p
+        .accessibilityHidden(true)
     }
 }
