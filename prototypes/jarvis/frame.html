@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111316">
+  <title>Daily Brief · Jarvis</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="reader.css">
+  <style>.brand-glyph {--glyph:url(@@BRAND@@)}</style>
+</head>
+<body>
+  <div class="windowbar" aria-hidden="true"><span class="lights"><i></i><i></i><i></i></span><span>Charon</span></div>
+  <div class="shell">
+    <aside class="rail" aria-label="Charon sidebar">
+      <div class="rail-full">
+        <div class="brand"><span class="pixel brand-glyph"></span><span>HALFTONE</span><button type="button" class="rail-toggle" data-action="rail" aria-label="Hide sidebar" title="Hide sidebar (Option + Command + S)">&lt;</button></div>
+        <nav class="rail-nav" aria-label="Charon destinations">@@NAV@@</nav>
+        <div class="rail-footer"><div><span>sources</span><i></i><span>sample</span></div><div><span>last sync</span><i></i><span>offline</span></div></div>
+      </div>
+      <button type="button" class="rail-open" data-action="rail" title="Show sidebar (Option + Command + S)" aria-label="Show sidebar">&gt;</button>
+    </aside>
+    <button type="button" class="scrim" aria-label="Close sidebar" data-action="rail"></button>
+    <main>
+      <header class="toolbar">
+        <nav id="crumbs" aria-label="Breadcrumb"></nav>
+        <div id="tools"></div>
+      </header>
+      <div id="scroller" tabindex="-1"><div id="page"></div></div>
+    </main>
+  </div>
+  <audio id="narration" preload="metadata" src="assets/brief.mp3"></audio>
+  <dialog id="panel" aria-labelledby="panel-title"><div class="panel-inner"><div class="panel-head"><h2 id="panel-title"></h2><button type="button" class="icon-btn" data-action="close" aria-label="Close dialog">@@CLOSE@@</button></div><div id="panel-body"></div></div></dialog>
+  <script type="application/json" id="content">@@DATA@@</script>
+  <script src="reader.js"></script>
+</body>
+</html>
