@@ -14,9 +14,14 @@
   <div class="shell">
     <aside class="rail" aria-label="Charon sidebar">
       <div class="rail-full">
-        <div class="brand"><span class="pixel brand-glyph"></span><span>HALFTONE</span><button type="button" class="rail-toggle" data-action="rail" aria-label="Hide sidebar" title="Hide sidebar (Option + Command + S)">&lt;</button></div>
-        <nav class="rail-nav" aria-label="Charon destinations">@@NAV@@</nav>
-        <div class="rail-footer"><div><span>sources</span><i></i><span>sample</span></div><div><span>last sync</span><i></i><span>offline</span></div></div>
+        <div class="rail-head">
+          <div class="brand"><span class="brand-mark" aria-hidden="true"><i class="pixel brand-glyph"></i></span><span>Halftone</span><button type="button" class="rail-toggle" data-action="rail" aria-label="Hide sidebar" title="Hide sidebar (Option + Command + S)">‹</button></div>
+          <button type="button" class="rail-jump" data-action="jump" aria-keyshortcuts="Meta+K Control+K"><i class="magnifier" aria-hidden="true"></i><span>Jump to</span><kbd aria-hidden="true">⌘K</kbd></button>
+        </div>
+        <nav class="rail-nav" aria-label="Charon destinations">
+          @@NAV@@
+        </nav>
+        <div class="rail-footer"><span>Sample data</span><span>Offline</span></div>
       </div>
       <button type="button" class="rail-open" data-action="rail" title="Show sidebar (Option + Command + S)" aria-label="Show sidebar">&gt;</button>
     </aside>

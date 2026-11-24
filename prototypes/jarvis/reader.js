@@ -212,6 +212,29 @@
     if (!panel.open) panel.showModal();
   }
 
+  function jumpTo() {
+    openPanel('Jump to', 'jump');
+    body.innerHTML = '<form role="search"><input class="jump-query" type="search" aria-label="Find a destination" ' +
+      'placeholder="Find a destination" autocomplete="off"><div class="jump-results"></div></form>';
+    const form = body.querySelector('form');
+    const input = form.querySelector('input');
+    const results = form.querySelector('.jump-results');
+    const destinations = [...jarvisNav.querySelectorAll('a')];
+    function updateResults() {
+      const query = input.value.trim().toLowerCase();
+      results.innerHTML = destinations.filter(link => link.textContent.toLowerCase().includes(query))
+        .map(link => '<a href="' + link.hash + '">' + escape(link.textContent) + '</a>').join('') ||
+        '<p>No matching destinations</p>';
+    }
+    input.addEventListener('input', updateResults);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      results.querySelector('a')?.click();
+    });
+    updateResults();
+    input.focus();
+  }
+
   function audioOptions() {
     openPanel('Audio options', 'audio');
     body.innerHTML = '<p>Play the included preview voice or choose a saved ElevenLabs recording for this brief.</p>' +
@@ -230,7 +253,7 @@
   }
 
   const actions = {
-    listen: toggleAudio, rail: toggleRail, audio: audioOptions, type: readSettings,
+    listen: toggleAudio, rail: toggleRail, jump: jumpTo, audio: audioOptions, type: readSettings,
     close() { panel.close(); },
     'reset-audio'() { changeRecording(null); },
     transcript() {
@@ -259,6 +282,13 @@
     const link = event.target.closest('a[href^="#"]');
     if (link && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
       event.preventDefault();
+      if (panelMode === 'jump') {
+        focusAfterPanel = null;
+        panel.close();
+        navigate(link.hash.slice(1), false);
+        scroller.focus({preventScroll:true});
+        return;
+      }
       navigate(link.hash.slice(1), link.hasAttribute('data-return'));
     }
     if (event.target === panel && !event.target.closest('.panel-inner')) panel.close();
@@ -267,6 +297,9 @@
     if (event.target.id === 'recording-file' && event.target.files.length) changeRecording(event.target.files[0]);
   });
   document.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.code === 'KeyK' && !panel.open) {
+      event.preventDefault(); jumpTo();
+    }
     if ((event.metaKey || event.ctrlKey) && event.altKey && event.code === 'KeyS' && !panel.open) {
       event.preventDefault(); toggleRail();
     }

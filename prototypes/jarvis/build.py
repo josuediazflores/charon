@@ -41,22 +41,35 @@ def rail():
     src = (native / "SidebarView.swift").read_text()
     specs = re.findall(r'SidebarItemSpec\(id: "(\w+)", icon: \.(pixel|text)\(([^)]+)\), label: "([^"]+)"\)', src)
     assert len(specs) == 8
-    rows = []
+    rows = {}
     for key, kind, mark, label in specs:
         if kind == "pixel":
-            graphic = '<i class="pixel" style="--glyph:url(' + glyph(mark.lstrip(".")) + ')"></i>'
+            graphic = '<i class="pixel" aria-hidden="true" style="--glyph:url(' + glyph(mark.lstrip(".")) + ')"></i>'
         else:
-            graphic = '<span aria-hidden="true">' + escape(mark.strip('"')) + '</span>'
+            graphic = '<span class="rail-symbol" aria-hidden="true">' + escape(mark.strip('"')) + '</span>'
         if key == "jarvis":
-            rows.append(
+            rows[key] = (
                 '<details id="jarvis-nav" open><summary class="rail-row">'
-                f'<i class="disclosure" aria-hidden="true"></i>{graphic}<span>{label}</span></summary>'
+                f'{graphic}<span>{label}</span><i class="disclosure" aria-hidden="true"></i></summary>'
                 '<div class="subnav"><a href="#brief">Daily Brief</a>'
                 '<a href="#tasks">Overnight tasks</a></div></details>'
             )
         else:
-            rows.append(f'<span class="rail-row" aria-disabled="true"><span></span>{graphic}<span>{label}</span></span>')
-    return "".join(rows)
+            rows[key] = f'<span class="rail-row" aria-disabled="true">{graphic}<span>{label}</span></span>'
+
+    groups = [
+        ("System", ("overview", "hardware")),
+        ("Work", ("cmo", "mail", "messages")),
+        ("Assistants", ("chat", "jarvis")),
+    ]
+    sections = []
+    for label, keys in groups:
+        items = "\n".join("              " + rows[key] for key in keys)
+        sections.append(f'            <div class="rail-group">\n              <h2>{label}</h2>\n{items}\n            </div>')
+    return (
+        '<div class="rail-groups">\n' + "\n".join(sections) + '\n          </div>\n'
+        f'          <div class="rail-settings">{rows["settings"]}</div>'
+    )
 
 
 def strip_frontmatter(raw):

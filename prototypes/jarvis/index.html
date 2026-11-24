@@ -14,9 +14,32 @@
   <div class="shell">
     <aside class="rail" aria-label="Charon sidebar">
       <div class="rail-full">
-        <div class="brand"><span class="pixel brand-glyph"></span><span>HALFTONE</span><button type="button" class="rail-toggle" data-action="rail" aria-label="Hide sidebar" title="Hide sidebar (Option + Command + S)">&lt;</button></div>
-        <nav class="rail-nav" aria-label="Charon destinations"><span class="rail-row" aria-disabled="true"><span></span><i class="pixel" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAANUlEQVR4nGNkYGBg+P///38QjQwYGRkZsUrANLAgc1B0MTAwMGHTBQN4JeHGwoxCcRQ+1wIAg/0UC7jEE7wAAAAASUVORK5CYII=)"></i><span>Overview</span></span><span class="rail-row" aria-disabled="true"><span></span><i class="pixel" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAL0lEQVR4nGNgQAL/////j8xnwiYI5yNLoLPBOnEBFElGRkZGDBW47ISrRFYAMwEAqEUj7GoGKLYAAAAASUVORK5CYII=)"></i><span>Hardware</span></span><span class="rail-row" aria-disabled="true"><span></span><i class="pixel" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAGElEQVR4nGP8////fwZcAJckSJxxsOkEAI7vJ92WcqHjAAAAAElFTkSuQmCC)"></i><span>CMO</span></span><span class="rail-row" aria-disabled="true"><span></span><i class="pixel" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAMElEQVR4nGP8////fwYcgAXGYGRkZISx4RpgDKw0srHobCZkO5CNBgEUSXTAiM+1AMt3J+uJAfAuAAAAAElFTkSuQmCC)"></i><span>Mail</span></span><span class="rail-row" aria-disabled="true"><span></span><i class="pixel" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAMElEQVR4nGP8////fwY0wMjIyAhmoEsi81mwCcLYTNiMg9FgSZhKbPbjtBviKhy6ACgvJ+8xSARXAAAAAElFTkSuQmCC)"></i><span>Messages</span></span><span class="rail-row" aria-disabled="true"><span></span><span aria-hidden="true">❯</span><span>Chat</span></span><details id="jarvis-nav" open><summary class="rail-row"><i class="disclosure" aria-hidden="true"></i><span aria-hidden="true">✦</span><span>Jarvis</span></summary><div class="subnav"><a href="#brief">Daily Brief</a><a href="#tasks">Overnight tasks</a></div></details><span class="rail-row" aria-disabled="true"><span></span><span aria-hidden="true">⌘</span><span>Settings</span></span></nav>
-        <div class="rail-footer"><div><span>sources</span><i></i><span>sample</span></div><div><span>last sync</span><i></i><span>offline</span></div></div>
+        <div class="rail-head">
+          <div class="brand"><span class="brand-mark" aria-hidden="true"><i class="pixel brand-glyph"></i></span><span>Halftone</span><button type="button" class="rail-toggle" data-action="rail" aria-label="Hide sidebar" title="Hide sidebar (Option + Command + S)">‹</button></div>
+          <button type="button" class="rail-jump" data-action="jump" aria-keyshortcuts="Meta+K Control+K"><i class="magnifier" aria-hidden="true"></i><span>Jump to</span><kbd aria-hidden="true">⌘K</kbd></button>
+        </div>
+        <nav class="rail-nav" aria-label="Charon destinations">
+          <div class="rail-groups">
+            <div class="rail-group">
+              <h2>System</h2>
+              <span class="rail-row" aria-disabled="true"><i class="pixel" aria-hidden="true" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAANUlEQVR4nGNkYGBg+P///38QjQwYGRkZsUrANLAgc1B0MTAwMGHTBQN4JeHGwoxCcRQ+1wIAg/0UC7jEE7wAAAAASUVORK5CYII=)"></i><span>Overview</span></span>
+              <span class="rail-row" aria-disabled="true"><i class="pixel" aria-hidden="true" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAL0lEQVR4nGNgQAL/////j8xnwiYI5yNLoLPBOnEBFElGRkZGDBW47ISrRFYAMwEAqEUj7GoGKLYAAAAASUVORK5CYII=)"></i><span>Hardware</span></span>
+            </div>
+            <div class="rail-group">
+              <h2>Work</h2>
+              <span class="rail-row" aria-disabled="true"><i class="pixel" aria-hidden="true" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAGElEQVR4nGP8////fwZcAJckSJxxsOkEAI7vJ92WcqHjAAAAAElFTkSuQmCC)"></i><span>CMO</span></span>
+              <span class="rail-row" aria-disabled="true"><i class="pixel" aria-hidden="true" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAMElEQVR4nGP8////fwYcgAXGYGRkZISx4RpgDKw0srHobCZkO5CNBgEUSXTAiM+1AMt3J+uJAfAuAAAAAElFTkSuQmCC)"></i><span>Mail</span></span>
+              <span class="rail-row" aria-disabled="true"><i class="pixel" aria-hidden="true" style="--glyph:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAYAAADEUlfTAAAAMElEQVR4nGP8////fwY0wMjIyAhmoEsi81mwCcLYTNiMg9FgSZhKbPbjtBviKhy6ACgvJ+8xSARXAAAAAElFTkSuQmCC)"></i><span>Messages</span></span>
+            </div>
+            <div class="rail-group">
+              <h2>Assistants</h2>
+              <span class="rail-row" aria-disabled="true"><span class="rail-symbol" aria-hidden="true">❯</span><span>Chat</span></span>
+              <details id="jarvis-nav" open><summary class="rail-row"><span class="rail-symbol" aria-hidden="true">✦</span><span>Jarvis</span><i class="disclosure" aria-hidden="true"></i></summary><div class="subnav"><a href="#brief">Daily Brief</a><a href="#tasks">Overnight tasks</a></div></details>
+            </div>
+          </div>
+          <div class="rail-settings"><span class="rail-row" aria-disabled="true"><span class="rail-symbol" aria-hidden="true">⌘</span><span>Settings</span></span></div>
+        </nav>
+        <div class="rail-footer"><span>Sample data</span><span>Offline</span></div>
       </div>
       <button type="button" class="rail-open" data-action="rail" title="Show sidebar (Option + Command + S)" aria-label="Show sidebar">&gt;</button>
     </aside>

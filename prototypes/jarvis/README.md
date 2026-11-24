@@ -4,6 +4,8 @@ Open `prototypes/jarvis/index.html` in a browser from a checkout of this branch.
 
 Expand **Jarvis** in the sidebar. **Daily Brief** plays the sample narration and shows its transcript. **Overnight tasks** opens the dated reports. The Chicago internship report links to its sources, the list delivered that morning and a later edit. The microphone report shows a research-only task. **Audio options** accepts a recording from your device, including a saved ElevenLabs clip.
 
+Use **Jump to** or **⌘K** (**Ctrl+K** also works) to find Daily Brief or Overnight tasks.
+
 ## Iterating
 
 Edit `reader.css` for layout or `reader.js` for behavior, then refresh the browser. Edit `frame.html` for the document shell and `fixtures/` for the Markdown. After changing the shell, fixtures or sidebar generator, rebuild the checked-in HTML from the repository root with Python 3, Pillow and Pandoc on your path.
