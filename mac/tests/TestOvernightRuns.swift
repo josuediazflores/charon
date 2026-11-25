@@ -33,6 +33,23 @@ struct TestOvernightRuns {
         precondition(iso.string(from: OvernightIntake.nextStart(after: beforeOne, calendar: calendar)) == "2026-11-24T09:00:00Z")
         precondition(iso.string(from: OvernightIntake.nextStart(after: afterOne, calendar: calendar)) == "2026-11-25T09:00:00Z")
         precondition(legacy.sources?.first?.url == "https://example.org/report")
+        let list = try decoder.decode([OvernightRun].self, from: Data(#"""
+        [
+          {"id":"running","title":"Running task","status":"running","created_at":"","updated_at":"2026-11-24T23:00:00Z"},
+          {"id":"scheduled","title":"Scheduled task","status":"scheduled","created_at":"","updated_at":"2026-11-23T01:00:00Z",
+           "run_at":"2026-11-25T01:00:00-08:00"},
+          {"id":"review","title":"Review task","status":"review","created_at":"","updated_at":"2026-11-24T15:00:00-08:00"},
+          {"id":"error","title":"Failed task","status":"error","created_at":"","updated_at":"2026-11-23T09:00:00Z"},
+          {"id":"dated","title":"Older task","status":"stopped","created_at":"","updated_at":"2026-11-21"},
+          {"id":"undated","title":"Older record","status":"done","created_at":"","updated_at":""}
+        ]
+        """#.utf8))
+        precondition(OvernightRunDateOrder.newestFirst.sorted(list).map(\.id) ==
+                     ["scheduled", "running", "review", "error", "dated", "undated"])
+        precondition(OvernightRunDateOrder.oldestFirst.sorted(list).map(\.id) ==
+                     ["dated", "error", "running", "review", "scheduled", "undated"])
+        precondition(list.filter(OvernightRunFilter.inFlight.matches).map(\.id) == ["running", "scheduled"])
+        precondition(list.filter(OvernightRunFilter.history.matches).map(\.id) == ["error", "dated", "undated"])
         let page = try decoder.decode(OvernightRunPage.self, from: Data(#"""
         {"runs":[{"id":"run-a","title":"Task","status":"done","created_at":"2026-11-22","updated_at":"2026-11-23"}],"next_cursor":"run-a"}
         """#.utf8))

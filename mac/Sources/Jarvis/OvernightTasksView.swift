@@ -27,6 +27,8 @@ private struct OvernightRunList: View {
     @State private var loading = true
     @State private var legacy = false
     @State private var error: String?
+    @State private var filter = OvernightRunFilter.all
+    @AppStorage("overnightTaskDateOrder") private var dateOrder = OvernightRunDateOrder.newestFirst
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,7 +53,7 @@ private struct OvernightRunList: View {
                     .id(selected.id)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 14) {
                         HStack {
                             Text("Overnight tasks").font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                             Spacer()
@@ -76,18 +78,9 @@ private struct OvernightRunList: View {
                         if runs.isEmpty && !loading && error == nil {
                             Text("No overnight tasks yet.").foregroundStyle(.secondary)
                         }
-                        ForEach(runs) { run in
-                            Button { route.append(run) } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(run.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(FocusInk.text)
-                                    Text(statusLine(run))
-                                        .font(.callout).foregroundStyle(.secondary)
-                                }
-                                .padding(16)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .focusCard().contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                        if !runs.isEmpty {
+                            listControls
+                            taskRows
                         }
                         if loading { ProgressView().controlSize(.small).accessibilityLabel("Loading overnight tasks") }
                         if let cursor, !loading, error == nil {
@@ -117,6 +110,122 @@ private struct OvernightRunList: View {
             loading = false
         }
     }
+
+    private var listControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                filterButtons
+                Spacer(minLength: 12)
+                dateMenu
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                filterButtons
+                dateMenu
+            }
+        }
+    }
+
+    private var filterButtons: some View {
+        HStack(spacing: 4) {
+            ForEach(OvernightRunFilter.allCases, id: \.self) { option in
+                let selected = option == filter
+                let count = runs.count(where: option.matches)
+                Button { filter = option } label: {
+                    HStack(spacing: 5) {
+                        Text(option.rawValue).fontWeight(selected ? .semibold : .regular)
+                        Text(count.formatted()).monospacedDigit().foregroundStyle(FocusInk.secondary)
+                    }
+                    .font(.callout)
+                    .fixedSize()
+                    .foregroundStyle(selected ? FocusInk.sand : FocusInk.text)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(selected ? HT.surface3 : HT.void, in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(option.rawValue), \(count) tasks")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .fixedSize()
+    }
+
+    private var dateMenu: some View {
+        Menu {
+            Picker("Sort by date", selection: $dateOrder) {
+                ForEach(OvernightRunDateOrder.allCases, id: \.self) { order in
+                    Text(order.rawValue).tag(order)
+                }
+            }
+        } label: {
+            Label(dateOrder.rawValue, systemImage: "arrow.up.arrow.down")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Sort by date")
+        .accessibilityValue(dateOrder.rawValue)
+        .help("Sort loaded tasks by the date shown in each row")
+    }
+
+    @ViewBuilder
+    private var taskRows: some View {
+        let visible = dateOrder.sorted(runs.filter(filter.matches))
+        if visible.isEmpty {
+            Text(filter == .inFlight ? "No in-flight tasks in this list." : "No task history in this list.")
+                .foregroundStyle(.secondary)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(visible) { run in
+                    Button { route.append(run) } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(run.name).font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(FocusInk.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(spacing: 7) {
+                                    let tone = statusColor(run)
+                                    Circle().fill(tone).frame(width: 5, height: 5).accessibilityHidden(true)
+                                    Text(run.statusLabel).foregroundStyle(tone)
+                                    let date = dateLabel(run.listTimestamp)
+                                    if !date.isEmpty {
+                                        Text("·").accessibilityHidden(true)
+                                        Text(date).monospacedDigit()
+                                    }
+                                }
+                                .font(.callout)
+                                .foregroundStyle(FocusInk.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                .foregroundStyle(FocusInk.secondary).accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if run.id != visible.last?.id {
+                        Rectangle().fill(FocusInk.cardLine).frame(height: 1)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+            .focusCard()
+        }
+    }
+
+    private func statusColor(_ run: OvernightRun) -> Color {
+        switch run.status {
+        case "review", "needs-input", "stopped": return FocusInk.sand
+        case "done": return HT.c10
+        case "error": return HT.c9
+        case "running": return HT.c12
+        default: return FocusInk.secondary
+        }
+    }
 }
 
 private func dateLabel(_ raw: String) -> String {
@@ -124,8 +233,7 @@ private func dateLabel(_ raw: String) -> String {
 }
 
 private func statusLine(_ run: OvernightRun) -> String {
-    let time = run.status == "scheduled" ? run.runAt ?? run.updatedAt : run.updatedAt
-    return [run.statusLabel, dateLabel(time)].filter { !$0.isEmpty }.joined(separator: " · ")
+    [run.statusLabel, dateLabel(run.listTimestamp)].filter { !$0.isEmpty }.joined(separator: " · ")
 }
 
 private struct RunColumn<Content: View>: View {

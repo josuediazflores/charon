@@ -42,6 +42,12 @@ struct OvernightRun: Decodable, Identifiable {
     var name: String { title.isEmpty ? (request?.prefix(90)).map(String.init) ?? id : title }
     var isPlanning: Bool { kind == "intake" || kind == "brain_dump" }
     var active: Bool { ["idle", "queued", "running"].contains(status) }
+    var listTimestamp: String { status == "scheduled" ? runAt ?? updatedAt : updatedAt }
+    var listDate: Date? {
+        let timestamp = listTimestamp
+        if timestamp.count == 10 { return Fmt.date(timestamp + "T00:00") }
+        return Fmt.date(timestamp)
+    }
     var statusLabel: String {
         switch status {
         case "done" where kind == "brain_dump": return "Tasks queued"
@@ -97,6 +103,35 @@ struct OvernightRun: Decodable, Identifiable {
             }
         }
         return files?.first { $0.path == path.joined(separator: "/") }
+    }
+}
+
+enum OvernightRunFilter: String, CaseIterable {
+    case all = "All"
+    case inFlight = "In flight"
+    case history = "History"
+
+    func matches(_ run: OvernightRun) -> Bool {
+        switch self {
+        case .all: return true
+        case .inFlight: return run.active || run.status == "scheduled"
+        case .history: return ["done", "error", "stopped"].contains(run.status)
+        }
+    }
+}
+
+enum OvernightRunDateOrder: String, CaseIterable {
+    case newestFirst = "Newest first"
+    case oldestFirst = "Oldest first"
+
+    func sorted(_ runs: [OvernightRun]) -> [OvernightRun] {
+        runs.map { (run: $0, date: $0.listDate) }
+            .sorted { lhs, rhs in
+                guard let left = lhs.date else { return false }
+                guard let right = rhs.date else { return true }
+                return self == .newestFirst ? left > right : left < right
+            }
+            .map(\.run)
     }
 }
 
