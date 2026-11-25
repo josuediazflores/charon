@@ -175,6 +175,49 @@ assert schema["required"] == ["tasks", "note"]
         self.assertEqual(self.http(body=self.body), (202,reply))
         self.assertFalse((self.root/".intake-jobs"/jid).exists())
 
+    def test_process_proposes_and_only_confirm_schedules_reviewed_markdown(self):
+        process = "/v1/jarvis/intake/process"
+        confirm = "/v1/jarvis/intake/confirm"
+        dump = {"request_id": self.body["request_id"], "text": "    Research internships\n\n## Trains\n"}
+        status, receipt = self.http(process, dump)
+        self.assertEqual(status, 202)
+        jid = receipt["id"]
+        get = "/v1/jarvis/runs/" + jid
+        plan = {"tasks": [{"title": "Roles", "goal": "Find internships", "context": "Chicago"},
+                          {"title": "Trains", "goal": "Compare service", "context": ""}], "note": ""}
+        kept = [{"title": "Summer roles", "goal": "List SWE internships", "context": "Chicago only"}]
+        choice = {"id": jid, "tasks": kept, "run_at": self.body["run_at"]}
+        self.assertEqual(self.http(confirm, choice)[0], 409)
+        with self.fake(plan):
+            worker.run(jid)
+        self.assertEqual(self.http(process, dump), (202, receipt))
+        draft = self.http(get)[1]
+        self.assertEqual((draft["status"], draft["kind"], draft["proposal"], draft["children"]),
+                         ("review", "brain_dump", plan["tasks"], []))
+        self.assertEqual((self.root/"runs"/jid/"files"/"Brain Dump.md").read_text(), dump["text"])
+        promote_due(self.root, self.when + timedelta(days=1))
+        self.assertFalse((self.root/".scheduled").exists())
+        self.assertEqual(self.http(confirm, {**choice, "tasks": []})[0], 400)
+        self.assertEqual(self.http(confirm, choice, auth=False)[0], 401)
+        with patch("collector.admit", return_value=nullcontext(False)):
+            self.assertEqual(self.http(confirm, choice)[0], 409)
+        real = jarvis_intake.file_once
+        def interrupted(*args, **kwargs):
+            real(*args, **kwargs)
+            raise OSError("lost progress after scheduling")
+        with patch.object(jarvis_intake, "file_once", side_effect=interrupted):
+            self.assertEqual(self.http(confirm, choice)[0], 500)
+        self.assertTrue(self.http(get)[1]["confirmation_started"])
+        self.assertEqual(self.http(confirm, {**choice, "tasks": plan["tasks"]})[0], 409)
+        with concurrent.futures.ThreadPoolExecutor(3) as pool:
+            self.assertEqual(list(pool.map(lambda _: self.http(confirm, choice), range(3))), [(202, receipt)] * 3)
+        done = self.http(get)[1]
+        self.assertEqual(done["status"], "done")
+        self.assertEqual([kid["title"] for kid in done["children"]], ["Summer roles"])
+        child = self.http("/v1/jarvis/runs/" + done["children"][0]["id"])[1]
+        self.assertEqual(child["request"], "List SWE internships\n\n## Context\n\nChicago only")
+        self.assertEqual(child["status"], "scheduled")
+
     def test_empty_plan_explains_and_invalid_plan_has_no_children(self):
         for plan, state in (({"tasks": [], "note": "Which destinations should I compare?"}, "done"),
                             ({"tasks": [{"title":"Bad", "text":""}], "note":""}, "error")):

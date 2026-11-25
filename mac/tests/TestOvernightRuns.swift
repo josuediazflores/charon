@@ -17,6 +17,14 @@ struct TestOvernightRuns {
         """#.utf8))
         precondition(plan.statusLabel == "Plan ready" && plan.children?.first?.parentId == plan.id)
         precondition(plan.children?.first?.runAt == plan.runAt && plan.children?.first?.statusLabel == "Scheduled")
+        let draft = try decoder.decode(OvernightRun.self, from: Data(#"""
+        {"id":"draft","kind":"brain_dump","status":"review","title":"Brain Dump","created_at":"","updated_at":"",
+         "proposal":[{"title":"Find roles","goal":"List summer openings","context":"Chicago"}],
+         "confirmation_started":false,"planning_note":"Check location","children":[]}
+        """#.utf8))
+        precondition(draft.statusLabel == "Ready for review" && draft.children?.isEmpty == true)
+        precondition(draft.proposal?.first?.valid == true && draft.planningNote == "Check location")
+        precondition(draft.confirmationStarted == false)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
         let iso = ISO8601DateFormatter()

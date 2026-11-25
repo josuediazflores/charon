@@ -103,11 +103,11 @@ its own memory.
 running as jobs in a second lane that never blocks the conversation. The orb is
 a 1-bit dither and its state is the session's state.
 
-In **Jarvis → Overnight tasks**, choose **Set overnight tasks**, describe what
-you want done, and pick a start date and time. The Pi uses Codex to separate
-the request into assignments as soon as you submit it. You can close your Mac
-after the Pi accepts the request. At the chosen time, the Pi starts the
-assignments as the research worker becomes available.
+In **Jarvis → Overnight tasks**, choose **Set overnight tasks** to open a blank
+Markdown page titled **Brain Dump**. Choose **Process** to have Codex propose
+tasks immediately. Expand each card to review or edit its title, goal and
+context, or delete it. Choose a start time and click **Done** to queue the
+remaining tasks. Once the Pi confirms, you can close your Mac.
 
 Each assignment has its own status, report, sources, and files. Completed runs
 stay in your history. Choose **Show earlier tasks** to load another page.

@@ -401,29 +401,33 @@ final class DemoStore: MailStore {
     func jarvisToday() async throws -> JarvisDay? { jarvis.todayRecord() }
     func jarvisDays() async -> [JarvisDaySummary]? { jarvis.daySummaries() }
     func jarvisDay(_ day: String) async throws -> JarvisDay? { jarvis.day(day) }
-    func submitOvernightTasks(requestID: UUID, text: String, runAt: Date) async throws -> String {
+    func processBrainDump(requestID: UUID, text: String) async throws -> String {
         let id = requestID.uuidString.lowercased()
-        let start = ISO8601DateFormatter().string(from: runAt)
-        if let existing = intakePlans.first(where: { $0.id == id }) {
-            guard existing.request == text, existing.runAt == start else {
-                throw OvernightSubmissionError(message: "This request already has a different plan.")
-            }
-            return id
+        // Give the local fixture the same visible processing transition as a live proposal.
+        try await Task.sleep(for: .milliseconds(900))
+        if intakePlans.contains(where: { $0.id == id }) { return id }
+        let tasks = text.split(whereSeparator: \.isNewline).map(String.init).map {
+            ProposedTask(title: String($0.prefix(80)), goal: $0, context: "")
         }
         let at = Fmt.stampNow()
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        let children = lines.map { line in
-            OvernightRun(id: UUID().uuidString.lowercased(), title: String(line.prefix(80)),
-                         status: "scheduled", createdAt: at, updatedAt: at, request: line,
+        intakePlans.insert(OvernightRun(id: id, title: "Brain Dump", status: "review",
+            createdAt: at, updatedAt: at, request: text, kind: "brain_dump", proposal: tasks), at: 0)
+        return id
+    }
+
+    func confirmBrainDump(id: String, tasks: [ProposedTask], runAt: Date) async throws {
+        guard let index = intakePlans.firstIndex(where: { $0.id == id }) else { throw MailError.badKey }
+        if intakePlans[index].status == "done" { return }
+        let start = ISO8601DateFormatter().string(from: runAt)
+        let at = Fmt.stampNow()
+        intakePlans[index].children = tasks.map {
+            OvernightRun(id: UUID().uuidString.lowercased(), title: $0.title, status: "scheduled",
+                         createdAt: at, updatedAt: at, request: [$0.goal, $0.context].joined(separator: "\n\n"),
                          parentId: id, runAt: start)
         }
-        let plan = OvernightRun(id: id, title: "Plan overnight tasks", status: "done", createdAt: at,
-                                updatedAt: at, request: text,
-                                markdown: "In this demo, each line becomes a task. On the Pi, Codex reads the whole description and splits it into assignments.",
-                                kind: "intake", runAt: start, children: children)
-        intakePlans.insert(plan, at: 0)
-        return id
+        intakePlans[index].runAt = start
+        intakePlans[index].proposal = tasks
+        intakePlans[index].status = "done"
     }
 
     private var demoIntakeRuns: [OvernightRun] {

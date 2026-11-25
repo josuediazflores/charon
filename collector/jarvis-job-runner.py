@@ -687,6 +687,14 @@ PLAN_SCHEMA = {
 }
 
 
+REVIEW_SCHEMA = {
+    **PLAN_SCHEMA, "properties": {**PLAN_SCHEMA["properties"], "tasks": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["title", "goal", "context"],
+        "properties": {key: {"type": "string"} for key in ("title", "goal", "context")}
+    }}}
+}
+
+
 def codex_output(path):
     with open(path, "rb") as f:
         data = f.read(CODEX_MAX_OUTPUT_BYTES + 1)
@@ -747,6 +755,18 @@ class CodexState(StreamState):
         self.files = files
 
 
+class ReviewState(CodexState):
+    def read_output(self, path):
+        value = codex_output(path)
+        if not isinstance(value, dict):
+            raise ValueError("Invalid proposal")
+        tasks = jarvis_intake.review_tasks(value.get("tasks"))
+        note = value.get("note")
+        if not isinstance(note, str) or len(note) > 4000 or (not tasks and not note.strip()):
+            raise ValueError("Expected a note for any unresolved request")
+        self.plan = {"tasks": tasks, "note": note}
+
+
 class PlanState(CodexState):
     def read_output(self, path):
         self.plan = jarvis_intake.validate_plan(codex_output(path))
@@ -754,10 +774,15 @@ class PlanState(CodexState):
 
 def run_codex(jid, doc, prompt, on_beat):
     planning = doc.get("kind") == "intake"
-    state = PlanState() if planning else CodexState()
+    if planning and doc.get("review_required"):
+        state, response_schema = ReviewState(), REVIEW_SCHEMA
+    elif planning:
+        state, response_schema = PlanState(), PLAN_SCHEMA
+    else:
+        state, response_schema = CodexState(), CODEX_SCHEMA
     with tempfile.TemporaryDirectory(prefix="jarvis-research-") as workspace:
         schema = Path(workspace, "response-schema.json")
-        schema.write_text(json.dumps(PLAN_SCHEMA if planning else CODEX_SCHEMA), encoding="utf-8")
+        schema.write_text(json.dumps(response_schema), encoding="utf-8")
         output = Path(workspace, "response.json")
         cmd = [
             CODEX, "--strict-config", *(["-c", 'web_search="disabled"'] if planning else ["--search"]),
@@ -1093,7 +1118,15 @@ array and explain why. Do not perform the assignments. User description:
 def plan_intake(jid, doc, on_beat):
     """Checkpoint the model's plan before filing any child. File each slot exactly once."""
     if "plan" not in doc:
-        state, stopped = run_codex(jid, doc, PLAN_PROMPT + doc["text"], on_beat)
+        prompt = PLAN_PROMPT
+        if doc.get("review_required"):
+            prompt = ("Propose independent tasks for human review from the Markdown below. Keep dependent "
+                      "steps together. For each write a concise title (80 characters), a concrete goal "
+                      "including its deliverable, and context preserving constraints, references and nuance. "
+                      "Goal and context each allow 4000 characters. Use empty context when unnecessary. "
+                      "Do not invent facts or perform the work. Explain unresolved requests in note. "
+                      "Return at most 24 tasks; if none are actionable return an empty array and a note.\n\n")
+        state, stopped = run_codex(jid, doc, prompt + doc["text"], on_beat)
         if stopped or not state.ok:
             settle(jid, doc, DONE if stopped else ERROR, result="[stopped]" if stopped else None,
                    error=None if stopped else (state.error or "Could not prepare the plan")[:300],
@@ -1102,6 +1135,11 @@ def plan_intake(jid, doc, on_beat):
         doc.update(plan=state.plan, children=[], usage=state.usage, elapsed_s=state.duration_s)
         jarvis_intake.atomic_json(Path(job_path(jid)), doc)
     plan = doc["plan"]
+    if doc.get("review_required"):
+        with run_files(jid) as files_fd:
+            archive_text(files_fd, "Brain Dump.md", doc["text"])
+        settle(jid, doc, DONE, result=plan["note"], usage=doc.get("usage"), elapsed_s=doc.get("elapsed_s"))
+        return
     for slot, task in enumerate(plan["tasks"]):
         if slot < len(doc["children"]):
             continue

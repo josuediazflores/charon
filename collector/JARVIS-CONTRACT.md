@@ -185,7 +185,16 @@ hard links are excluded. Legacy runs can have an empty file list.
 
 ### Overnight task descriptions
 
-The Mac submits an authenticated `POST /v1/jarvis/intake` with `request_id`
+The Mac's Brain Dump editor sends Markdown and a request UUID to
+`POST /v1/jarvis/intake/process`. A 202 receipt identifies the planner.
+Once the detail status becomes `review`, the Mac displays `proposal` cards with
+`title`, `goal` and `context`. The original source is archived as `Brain Dump.md`.
+Processing alone creates zero research jobs. Done sends the reviewed cards,
+the planner `id` and a future `run_at` to `POST /v1/jarvis/intake/confirm`.
+The collector records that choice before scheduling children. An identical retry
+resumes interrupted filing. A different choice after confirmation returns 409.
+
+Earlier clients submit an authenticated `POST /v1/jarvis/intake` with `request_id`
 (UUID), `text` (up to 12,000 characters) and `run_at` (a future RFC3339
 timestamp with timezone). A 202 response includes the planner run's `id`.
 Retry a lost response with the same UUID and input, even after the selected

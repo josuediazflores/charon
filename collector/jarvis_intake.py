@@ -27,7 +27,7 @@ def required_text(value, limit, label):
     return text
 
 
-def parse_request(doc):
+def parse_description(doc, *, preserve_markdown=False):
     if not isinstance(doc, dict):
         raise ValueError("Expected a JSON object")
     key = doc.get("request_id")
@@ -35,11 +35,23 @@ def parse_request(doc):
         raise ValueError("request_id must be a UUID")
     key = str(UUID(key))
     text = required_text(doc.get("text"), MAX_INPUT, "Description")
-    raw = doc.get("run_at")
+    if preserve_markdown:
+        text = doc["text"]
+        if len(text) > MAX_INPUT:
+            raise ValueError(f"Description exceeds {MAX_INPUT} characters")
+    return key, text
+
+
+def parse_request(doc):
+    key, text = parse_description(doc)
+    return key, text, parse_time(doc.get("run_at"))
+
+
+def parse_time(raw):
     if not isinstance(raw, str) or not TIMESTAMP.fullmatch(raw):
         raise ValueError("run_at must be an RFC3339 date and time with a timezone")
     when = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
-    return key, text, when.isoformat().replace("+00:00", "Z")
+    return when.isoformat().replace("+00:00", "Z")
 
 
 def validate_plan(value):
@@ -104,7 +116,7 @@ def read_json(path):
     return value
 
 
-def file_once(root, key, title, text, run_at, *, parent_id=None):
+def file_once(root, key, title, text, run_at, *, parent_id=None, review=False):
     """A retry can finish a started filing but cannot create a second job."""
     root = Path(root)
     jobs, receipts = root / "jobs", root / ".intake-receipts"
@@ -121,7 +133,7 @@ def file_once(root, key, title, text, run_at, *, parent_id=None):
                 raise RequestConflict("This request ID was already used for a different assignment")
             if receipt["placed"]:
                 return receipt["id"]
-        elif not parent_id and datetime.fromisoformat(run_at.replace("Z", "+00:00")) <= datetime.now(timezone.utc):
+        elif not parent_id and not review and datetime.fromisoformat(run_at.replace("Z", "+00:00")) <= datetime.now(timezone.utc):
             raise ValueError("Choose a future start time")
 
         for _ in range(64):
@@ -143,6 +155,8 @@ def file_once(root, key, title, text, run_at, *, parent_id=None):
                     job["parent_id"] = parent_id
                 else:
                     job["kind"] = "intake"
+                    if review:
+                        job["review_required"] = True
                 try:
                     atomic_json(job_path, job, exclusive=True)
                 except FileExistsError:
@@ -164,3 +178,49 @@ def file_once(root, key, title, text, run_at, *, parent_id=None):
         receipt["placed"] = True
         atomic_json(receipt_path, receipt)
         return jid
+
+
+def review_tasks(tasks):
+    if not isinstance(tasks, list) or len(tasks) > MAX_TASKS:
+        raise ValueError(f"Expected up to {MAX_TASKS} tasks")
+    clean = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            raise ValueError("Invalid task")
+        context = task.get("context")
+        if not isinstance(context, str) or len(context) > 4000:
+            raise ValueError("Context must fit within 4000 characters")
+        context.encode("utf-8")
+        clean.append({"title": required_text(task.get("title"), 80, "Title"),
+                      "goal": required_text(task.get("goal"), 4000, "Goal"),
+                      "context": context.strip()})
+    return clean
+
+
+def confirm_review(root, jid, body):
+    # Caller serializes confirmations. Persist the choice before filing any child.
+    path = Path(root) / "jobs" / (jid + ".json")
+    doc = read_json(path)
+    if not doc or not doc.get("review_required") or doc.get("status") != "done" or "plan" not in doc:
+        raise RequestConflict("This plan is unavailable for review")
+    approval = {"run_at": parse_time(body.get("run_at")), "tasks": review_tasks(body.get("tasks"))}
+    if not approval["tasks"]:
+        raise ValueError("Keep at least one task to schedule")
+    if "approval" in doc:
+        if doc["approval"] != approval:
+            raise RequestConflict("This plan already has a different confirmed schedule")
+    else:
+        if datetime.fromisoformat(approval["run_at"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):
+            raise ValueError("Choose a future start time")
+        doc.update(approval=approval, run_at=approval["run_at"])
+        atomic_json(path, doc)
+    for slot, task in enumerate(approval["tasks"]):
+        if slot < len(doc["children"]):
+            continue
+        instructions = task["goal"]
+        if task["context"]:
+            instructions += "\n\n## Context\n\n" + task["context"]
+        child = file_once(root, f"{jid}-{slot}", task["title"], instructions, doc["run_at"], parent_id=jid)
+        doc["children"].append(child)
+        atomic_json(path, doc)
+    return jid

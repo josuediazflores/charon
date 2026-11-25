@@ -82,10 +82,14 @@ def row(root, doc, queued):
     parent = _text(doc, "parent_id")
     planner = doc.get("kind") == "intake"
     if planner:
-        result["kind"] = "intake"
+        result["kind"] = "brain_dump" if doc.get("review_required") else "intake"
     if JOB_ID.fullmatch(parent):
         result["parent_id"] = parent
-    if planner or parent:
+    if doc.get("review_required") and status == "done" and "plan" in doc:
+        approval = doc.get("approval")
+        if not approval or len(doc.get("children", [])) < len(approval["tasks"]):
+            status = "review"
+    if (planner or parent) and doc.get("run_at"):
         result["run_at"] = _text(doc, "run_at")
     if parent and ((status == "idle" and os.path.isfile(os.path.join(root, ".jobstop", jid)))
                    or (status == "done" and _text(doc, "result") == "[stopped]")):
@@ -188,6 +192,10 @@ def detail(root, queued, jid):
     result = {**row(root, doc, queued), "request": _text(doc, "text"), "error": _text(doc, "error") or None,
               "markdown": markdown, "sources": sources(markdown), "files": _file_rows(root, jid)}
     if doc.get("kind") == "intake":
+        if doc.get("review_required") and "plan" in doc:
+            result["confirmation_started"] = "approval" in doc
+            result["proposal"] = doc.get("approval", doc["plan"])["tasks"]
+            result["planning_note"] = doc["plan"]["note"]
         result["children"] = []
         for child in doc.get("children", []):
             if not isinstance(child, str) or not JOB_ID.fullmatch(child):

@@ -30,7 +30,18 @@ private struct OvernightRunList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let selected = route.last {
+            if composing {
+                OvernightIntakeView(store: store, scope: draftScope, back: { composing = false }) { plan in
+                    composing = false
+                    route = [plan]
+                }
+            } else if let selected = route.last, selected.kind == "brain_dump", selected.status != "done" {
+                BrainDumpReview(store: store, scope: draftScope, plan: selected, back: {
+                    route.removeLast()
+                    query = PageRequest()
+                }, confirmed: { plan in route = [plan] })
+                .id(selected.id)
+            } else if let selected = route.last {
                 RunReader(store: store, summary: selected, legacy: legacy,
                           backTitle: route.dropLast().last?.name ?? "Overnight tasks",
                           openChild: { route.append($0) }) {
@@ -86,13 +97,6 @@ private struct OvernightRunList: View {
                     .frame(maxWidth: 690, alignment: .leading).padding(32)
                     .frame(maxWidth: .infinity)
                 }
-            }
-        }
-        .sheet(isPresented: $composing) {
-            OvernightIntakeView(store: store, scope: draftScope) { plan in
-                composing = false
-                route = [plan]
-                query = PageRequest()
             }
         }
         .task(id: query) {
@@ -179,7 +183,7 @@ private struct RunReader: View {
                         RunMarkdown(markdown: markdown, run: report, scroll: scroll, follow: { attachments.append($0) })
                     } else if report.isPlanning && report.active {
                         Text("Jarvis is preparing your tasks.").foregroundStyle(.secondary)
-                    } else if report.status != "scheduled" && report.status != "stopped" {
+                    } else if report.kind != "brain_dump" && report.status != "scheduled" && report.status != "stopped" {
                         Text("This run has no saved report yet.").foregroundStyle(.secondary)
                     }
                     if let children = report.children, !children.isEmpty {

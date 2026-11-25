@@ -6141,14 +6141,25 @@ class Collector:
                 return None, f"cannot queue the job: {exc.strerror or exc}", 500
             return jid, None, None
 
-    def jarvis_intake(self, body):
+    def jarvis_intake(self, body, operation="intake"):
         try:
-            key, text, run_at = jarvis_intake.parse_request(body)
+            if not isinstance(body, dict):
+                raise ValueError("Expected a JSON object")
             root = self.jarvis_dir()
             if not root:
                 return None, "chat.base_dir is unset", 503
             with self._jarvis_lock:
-                jid = jarvis_intake.file_once(root, key, jarvis_intake.TITLE, text, run_at)
+                if operation == "confirm":
+                    jid = body.get("id")
+                    if not isinstance(jid, str) or not jarvis_runs.JOB_ID.fullmatch(jid):
+                        raise ValueError("Invalid plan ID")
+                    jid = jarvis_intake.confirm_review(root, jid, body)
+                elif operation == "process":
+                    key, text = jarvis_intake.parse_description(body, preserve_markdown=True)
+                    jid = jarvis_intake.file_once(root, "draft-" + key, "Brain Dump", text, None, review=True)
+                else:
+                    key, text, run_at = jarvis_intake.parse_request(body)
+                    jid = jarvis_intake.file_once(root, key, jarvis_intake.TITLE, text, run_at)
             return jid, None, None
         except jarvis_intake.RequestConflict as exc:
             return None, str(exc), 409
@@ -9619,12 +9630,14 @@ def make_handler(collector, token):
             if path == JARVIS_TTS_WARM_ROUTE:
                 return self._jarvis_tts_warm()
 
-            if path == "/v1/jarvis/intake":
+            if path in ("/v1/jarvis/intake", "/v1/jarvis/intake/process", "/v1/jarvis/intake/confirm"):
                 # An escaped non-BMP character takes 12 bytes in a JSON string.
-                doc, why = self._read_body(jarvis_intake.MAX_INPUT * 12 + 1024)
+                operation = path.rsplit("/", 1)[-1]
+                limit = (jarvis_intake.MAX_TASKS * 8100 if operation == "confirm" else jarvis_intake.MAX_INPUT)
+                doc, why = self._read_body(limit * 12 + 4096)
                 if why:
                     return self._json(400, {"error": why})
-                jid, why, code = collector.jarvis_intake(doc)
+                jid, why, code = collector.jarvis_intake(doc, operation)
                 return self._json(code or 202, {"error": why} if why else {"id": jid})
 
             if path in JARVIS_POST_ROUTES:

@@ -73,7 +73,8 @@ protocol ConsoleStore: AnyObject {
     func jarvisJobs() async -> [JarvisJob]?
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage
     func overnightRun(id: String) async throws -> OvernightRun?
-    func submitOvernightTasks(requestID: UUID, text: String, runAt: Date) async throws -> String
+    func processBrainDump(requestID: UUID, text: String) async throws -> String
+    func confirmBrainDump(id: String, tasks: [ProposedTask], runAt: Date) async throws
     /// A local temporary download. Its caller moves or removes it after reading.
     func overnightFile(run: String, file: String) async throws -> URL?
     /// The talk lane, which can answer `busy`: one turn at a time.

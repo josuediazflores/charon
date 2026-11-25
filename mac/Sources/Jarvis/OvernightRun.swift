@@ -16,11 +16,14 @@ struct OvernightRun: Decodable, Identifiable {
     var parentId: String?
     var runAt: String?
     var children: [OvernightRun]?
+    var proposal: [ProposedTask]?
+    var planningNote: String?
+    var confirmationStarted: Bool?
     var fromJobList = false
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, createdAt, updatedAt, request, markdown, error, sources, files
-        case kind, parentId, runAt, children
+        case kind, parentId, runAt, children, proposal, planningNote, confirmationStarted
     }
 
     struct Source: Decodable, Hashable {
@@ -37,12 +40,14 @@ struct OvernightRun: Decodable, Identifiable {
     }
 
     var name: String { title.isEmpty ? (request?.prefix(90)).map(String.init) ?? id : title }
-    var isPlanning: Bool { kind == "intake" }
+    var isPlanning: Bool { kind == "intake" || kind == "brain_dump" }
     var active: Bool { ["idle", "queued", "running"].contains(status) }
     var statusLabel: String {
         switch status {
+        case "done" where kind == "brain_dump": return "Tasks queued"
         case "done": return isPlanning ? "Plan ready" : "Completed"
         case "error": return "Failed"
+        case "review": return "Ready for review"
         case "needs-input": return "Needs input"
         default: return status.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -92,6 +97,18 @@ struct OvernightRun: Decodable, Identifiable {
             }
         }
         return files?.first { $0.path == path.joined(separator: "/") }
+    }
+}
+
+struct ProposedTask: Codable, Equatable {
+    var title: String
+    var goal: String
+    var context: String
+
+    var valid: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.unicodeScalars.count <= 80 &&
+        !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && goal.unicodeScalars.count <= 4000 &&
+        context.unicodeScalars.count <= 4000
     }
 }
 

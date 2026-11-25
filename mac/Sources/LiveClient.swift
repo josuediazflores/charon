@@ -493,10 +493,22 @@ final class LiveClient: MailStore {
         try await fetch("v1/jarvis/day/\(day)", as: JarvisDay.self)
     }
 
-    func submitOvernightTasks(requestID: UUID, text: String, runAt: Date) async throws -> String {
-        let body = ["request_id": requestID.uuidString.lowercased(), "text": text,
-                    "run_at": ISO8601DateFormatter().string(from: runAt)]
-        let (data, response) = try await session.data(for: request("v1/jarvis/intake", method: "POST", json: body))
+    func processBrainDump(requestID: UUID, text: String) async throws -> String {
+        try await intakeReceipt("v1/jarvis/intake/process", body: [
+            "request_id": requestID.uuidString.lowercased(), "text": text
+        ])
+    }
+
+    func confirmBrainDump(id: String, tasks: [ProposedTask], runAt: Date) async throws {
+        let receipt = try await intakeReceipt("v1/jarvis/intake/confirm", body: [
+            "id": id, "run_at": ISO8601DateFormatter().string(from: runAt),
+            "tasks": tasks.map { ["title": $0.title, "goal": $0.goal, "context": $0.context] }
+        ])
+        guard receipt == id else { throw MailError.badKey }
+    }
+
+    private func intakeReceipt(_ path: String, body: [String: Any]) async throws -> String {
+        let (data, response) = try await session.data(for: request(path, method: "POST", json: body))
         let code = try check(response)
         guard code == 202 else {
             struct CollectorError: Decodable { let error: String }
