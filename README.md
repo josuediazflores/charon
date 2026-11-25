@@ -168,17 +168,17 @@ different one. The mail triage unit deliberately loads `secrets/env` (the model
 provider's key) and never `secrets/mail-env` (the mailbox password), so the one
 process that starts a model cannot be handed the mailbox.
 
-**Model sessions run under default-deny allowlists.** There are three session
-environments, and the working directory is the wall:
+**Model access differs by surface.** Chat and Jarvis talk use Claude. Background
+research uses Codex CLI with the Pi operator’s ChatGPT sign-in.
 
 | Surface | Directory on the Pi | May |
 |---|---|---|
 | Chat tab | `halftone-chat/env/` | read, plus write its own memory store through `bin/memory` |
 | Jarvis talk | `halftone-chat/sayenv/` | the same, plus file background jobs through `bin/jarvis-job` |
-| Jarvis work | `halftone-chat/jobenv/` | read, `Write`/`Edit`/`Task`, web search and fetch. Memory is readable here and not writable |
+| Jarvis work | Temporary directory for each research job | Search the web and return Markdown and text files for the runner to archive |
 | Mail and messages triage | `charon-mail/mail-env/` | intended to be tool-less: an empty allow list and a deny on `Edit` over the tree |
 
-`defaultMode` is `dontAsk` everywhere, so anything not matched by an allow rule is
+`defaultMode` is `dontAsk` in the Claude environments, so anything not matched by an allow rule is
 refused rather than queued behind a dialog nobody will answer. `deny` beats
 `allow`, and the deny lists are the containment story: `.env` files, `~/.ssh`,
 `secrets/`, every `.claude/` directory, and the per-process `/proc` files that
@@ -483,7 +483,17 @@ format. No conversation is read until you allow it in the app.
 
 ### 6. Chat and Jarvis
 
-These are the model sessions that run on the Pi. Directories first, because
+Install the native Codex CLI on the Pi to use **As job** in Jarvis. Sign in once
+as the user that runs the service. The default executable is `~/.local/bin/codex`.
+See the [Codex CLI installation guide](https://developers.openai.com/codex/cli/).
+
+```sh
+install -d -m 0700 ~/.codex-jarvis
+CODEX_HOME="$HOME/.codex-jarvis" ~/.local/bin/codex login
+CODEX_HOME="$HOME/.codex-jarvis" ~/.local/bin/codex login status
+```
+
+Create the service directories first, because
 `ReadWritePaths=` fails on a path that is not there and a `.path` unit watching a
 missing directory sits inactive forever while looking healthy.
 

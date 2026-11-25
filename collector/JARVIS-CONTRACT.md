@@ -154,10 +154,22 @@ The first reader uses each existing job record as one run. A run summary contain
 `id`, `title`, `status`, `created_at` and `updated_at`. Follow a non-null
 `next_cursor` with `?before=<cursor>` to read the next page in descending job-ID
 order. Detail adds `request`, `markdown`, nullable `error`, `sources` and `files`.
-The worker creates `$BASE/jarvis/runs/<job-id>/files/` for each job. It gives
-the agent that path for requested deliverables and asks it to cite its sources
-with descriptive Markdown links. On success, the worker saves the final reply
-as `report.md` with an atomic rename before marking the job done.
+
+The overnight job worker defaults to Codex CLI 0.172.0. Set
+`JARVIS_CODEX_BIN` to override `~/.local/bin/codex` or `JARVIS_CODEX_HOME` to
+override `~/.codex-jarvis`. Sign in with ChatGPT under that same Codex home as
+the service user. The worker uses live hosted web search, an empty workspace,
+and a read-only permission profile. Codex returns a Markdown report and any
+requested CSV, Markdown, JSON or plain text attachments as structured data.
+The worker validates the complete response and atomically publishes its files.
+The structured response limit is 2 MiB and 256 attachments. Job records include
+the actual `provider` and, for Codex, the count of completed `web_searches`.
+The Mac's conversation model choice applies to the Claude backend. Operators
+can select that backend explicitly with `JARVIS_JOB_BACKEND=claude`.
+
+The worker publishes each job’s deliverables under
+`$BASE/jarvis/runs/<job-id>/files/`, including the final Markdown reply
+as `report.md`, before marking the job done.
 
 For completed jobs, the report reader opens the archived UTF-8 `report.md` and
 extracts source labels and HTTP(S) URLs from its Markdown. The inline report

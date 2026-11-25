@@ -45,18 +45,10 @@ MemoryMax=3G
 # which is the same retry with a truer trigger: it restarts because work is
 # still waiting, not because a process exited.
 
-# -- what this session can touch ------------------------------------------
-#
-# Lighter than halftone-collector.service on purpose, and identical to
-# halftone-chat.service for the same reason: these sessions exist to answer
-# questions about the state of this box, so they read /proc, /sys, the journal
-# and the unit files. Sandboxing those away would leave an assistant that can
-# only say it does not know. The narrowing that matters happens one level up
-# instead -- in env/.claude/settings.json, which is a default-deny allowlist of
-# read-only commands, and in the CLI's own --permission-mode dontAsk.
-#
-# So: no ProtectSystem=strict, no ProtectHome. What is kept is the pair that
-# costs nothing and closes the worst outcomes.
+# The Codex researcher uses its own signed-in CLI home and a temporary
+# workspace with a read-only permission profile. It returns structured text;
+# the trusted runner publishes the files. JARVIS_JOB_BACKEND=claude selects
+# the older worker environment and its existing tool allowlist.
 NoNewPrivileges=true
 PrivateTmp=yes
 
