@@ -370,6 +370,9 @@ private struct StartTimeEditor: View {
 private struct ReviewCard: Codable, Identifiable {
     var id = UUID()
     var task: ProposedTask
+    var sources: String?
+    var submission: ProposedTask? { task.withSuggestedSources(sources ?? "") }
+    var valid: Bool { submission?.valid == true }
 }
 
 struct BrainDumpReview: View {
@@ -381,6 +384,7 @@ struct BrainDumpReview: View {
     @SceneStorage private var start: Double
     @State private var cards: [ReviewCard] = []
     @State private var expanded: Set<UUID> = []
+    @State private var editingCards: Set<UUID> = []
     @State private var loaded = false
     @State private var note = ""
     @State private var original = ""
@@ -412,7 +416,7 @@ struct BrainDumpReview: View {
                 if loaded {
                     Button("Done") { Task { await finish() } }
                         .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
-                        .disabled(saving || cards.isEmpty || !cards.allSatisfy { $0.task.valid })
+                        .disabled(saving || cards.isEmpty || !cards.allSatisfy { $0.valid })
                 }
             }
             Divider()
@@ -467,6 +471,17 @@ struct BrainDumpReview: View {
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain)
                 Button {
+                    if editingCards.contains(id) {
+                        editingCards.remove(id)
+                    } else {
+                        expanded.insert(id)
+                        editingCards.insert(id)
+                    }
+                } label: {
+                    Label(editingCards.contains(id) ? "Finish editing" : "Edit",
+                          systemImage: editingCards.contains(id) ? "checkmark" : "pencil")
+                }.disabled(editingCards.contains(id) && !binding.wrappedValue.valid)
+                Button {
                     cards.removeAll { $0.id == id }
                     persist()
                 } label: { Image(systemName: "trash") }
@@ -474,22 +489,39 @@ struct BrainDumpReview: View {
             }
             if expanded.contains(id) {
                 Divider()
-                field("Title", text: task.title)
-                field("Goal", text: task.goal)
-                field("Context", text: task.context)
-                if !task.wrappedValue.valid {
-                    Text("Enter a title of up to 80 characters and a goal. Goal and context allow 4,000 characters each.")
+                let editing = editingCards.contains(id)
+                field("Title", text: task.title, editing: editing)
+                field("Goal", text: task.goal, editing: editing)
+                field("Context", text: task.context, editing: editing)
+                let links = Binding<String>(get: { binding.wrappedValue.sources ?? "" },
+                                            set: { binding.wrappedValue.sources = $0 })
+                field("Suggested sources", text: links, editing: editing, placeholder: "One web link per line")
+                if editing {
+                    Text("Jarvis can also research other sources.").font(.caption).foregroundStyle(.secondary)
+                }
+                if binding.wrappedValue.submission == nil {
+                    Text("Enter one complete http or https link per line.").font(.caption).foregroundStyle(.secondary)
+                } else if !binding.wrappedValue.valid {
+                    Text("Add a title (up to 80 characters) and goal (up to 4,000). Context and suggested sources together must fit within 4,000 characters.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }.padding(16).focusCard()
     }
 
-    private func field(_ label: String, text: Binding<String>) -> some View {
+    private func field(_ label: String, text: Binding<String>, editing: Bool, placeholder: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            TextField(label, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; persist() }),
-                      axis: .vertical).textFieldStyle(.plain).accessibilityLabel(label)
+            if editing {
+                TextField(placeholder ?? label, text: Binding(get: { text.wrappedValue }, set: {
+                    text.wrappedValue = $0
+                    persist()
+                }), axis: .vertical)
+                    .textFieldStyle(.roundedBorder).accessibilityLabel(label)
+            } else {
+                Text(verbatim: text.wrappedValue.isEmpty ? "None" : text.wrappedValue)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -526,12 +558,12 @@ struct BrainDumpReview: View {
     }
 
     private func finish() async {
-        guard !saving, !cards.isEmpty, cards.allSatisfy({ $0.task.valid }) else { return }
+        guard !saving, !cards.isEmpty, cards.allSatisfy({ $0.valid }) else { return }
         saving = true
         defer { saving = false }
         error = nil
         do {
-            try await store.confirmBrainDump(id: plan.id, tasks: cards.map(\.task),
+            try await store.confirmBrainDump(id: plan.id, tasks: cards.compactMap(\.submission),
                                              runAt: Date(timeIntervalSinceReferenceDate: start))
             var result = plan
             result.status = "done"

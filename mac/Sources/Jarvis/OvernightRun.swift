@@ -169,6 +169,19 @@ struct ProposedTask: Codable, Equatable {
     var goal: String
     var context: String
 
+    func withSuggestedSources(_ input: String) -> ProposedTask? {
+        let links = input.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !links.isEmpty else { return self }
+        guard links.allSatisfy({ !$0.contains(where: { $0.isWhitespace }) && OvernightRun.webLink($0) != nil })
+        else { return nil }
+        var result = self
+        let instructions = "## Suggested sources\nUse these as starting points. Consult other sources as needed."
+        let sources = links.map { "- " + $0 }.joined(separator: "\n")
+        result.context = [context, instructions + "\n" + sources].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        return result
+    }
+
     var valid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.unicodeScalars.count <= 80 &&
         !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && goal.unicodeScalars.count <= 4000 &&

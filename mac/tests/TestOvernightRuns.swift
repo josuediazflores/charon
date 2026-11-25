@@ -49,6 +49,12 @@ struct TestOvernightRuns {
         """#.utf8))
         precondition(brief.spokenText == "I found two roles." && brief.markdown == "# Daily Brief")
         precondition(brief.runs.first?.id == "research-17" && brief.runs.first?.outcome == "Two roles have application links.")
+        let task = ProposedTask(title: "Find poke", goal: "Compare local spots", context: "San Jose, CA")
+        precondition(task.withSuggestedSources("  ") == task)
+        precondition(task.withSuggestedSources("file:///tmp/notes") == nil)
+        let suggested = task.withSuggestedSources("https://example.org/a\nhttps://example.org/b")!
+        precondition(suggested.valid && suggested.context.contains("San Jose, CA"))
+        precondition(suggested.context.contains("Consult other sources") && suggested.context.hasSuffix("- https://example.org/b"))
         let missingSpeech = Data(#"{"date":"2026-11-24","markdown":"Daily Brief","runs":[]}"#.utf8)
         precondition((try? decoder.decode(DailyBrief.self, from: missingSpeech)) == nil)
         let beforeOne = iso.date(from: "2026-11-24T08:59:00Z")!
