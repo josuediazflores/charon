@@ -189,6 +189,7 @@ The Mac's Brain Dump editor sends Markdown and a request UUID to
 `POST /v1/jarvis/intake/process`. A 202 receipt identifies the planner.
 Once the detail status becomes `review`, the Mac displays `proposal` cards with
 `title`, `goal` and `context`. The original source is archived as `Brain Dump.md`.
+The review planner uses Codex CLI with gpt-6-luna to summarize goals and constraints.
 Processing alone creates zero research jobs. Done sends the reviewed cards,
 the planner `id` and a future `run_at` to `POST /v1/jarvis/intake/confirm`.
 The collector records that choice before scheduling children. An identical retry

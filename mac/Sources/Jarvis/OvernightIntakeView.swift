@@ -29,10 +29,15 @@ struct OvernightIntakeView: View {
                 Button("Process") { Task { await process() } }
                     .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    .disabled(sending || (store as? DemoStore)?.hasPreviewPlanner == false || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               draft.unicodeScalars.count > OvernightIntake.textLimit)
             }
             Divider()
+            if let demo = store as? DemoStore {
+                Text(demo.hasPreviewPlanner
+                     ? "Process uses Codex on this Mac. Reviewed tasks stay in this demo."
+                     : "Connect to your Pi in Live mode to process notes with Codex.").font(.callout).foregroundStyle(.secondary)
+            }
             if sending {
                 SeparatingTasks()
             } else {

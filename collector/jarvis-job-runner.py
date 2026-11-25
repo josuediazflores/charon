@@ -792,7 +792,8 @@ def run_codex(jid, doc, prompt, on_beat):
             "-c", 'default_permissions="jarvis"',
             "-c", 'permissions.jarvis.filesystem={":workspace_roots"="read"}',
             "-c", "permissions.jarvis.network.enabled=false",
-            "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
+            "exec", *(["--model", "gpt-6-luna"] if doc.get("review_required") and planning else []),
+            "--ignore-user-config", "--ignore-rules", "--ephemeral",
             "--skip-git-repo-check", "--json", "--output-schema", str(schema),
             "--output-last-message", str(output), "-",
         ]
@@ -1120,12 +1121,20 @@ def plan_intake(jid, doc, on_beat):
     if "plan" not in doc:
         prompt = PLAN_PROMPT
         if doc.get("review_required"):
-            prompt = ("Propose independent tasks for human review from the Markdown below. Keep dependent "
-                      "steps together. For each write a concise title (80 characters), a concrete goal "
-                      "including its deliverable, and context preserving constraints, references and nuance. "
-                      "Goal and context each allow 4000 characters. Use empty context when unnecessary. "
-                      "Do not invent facts or perform the work. Explain unresolved requests in note. "
-                      "Return at most 24 tasks; if none are actionable return an empty array and a note.\n\n")
+            prompt = (
+                "Turn the user's rough Markdown notes into task cards for their review. Read the entire "
+                "note before splitting by independent outcomes. Keep related steps together, even across "
+                "paragraphs. Rewrite in clear language and correct obvious misspellings. "
+                "Title: write a short, specific action and subject, usually 3 to 8 words (max 80 characters). "
+                "Goal: summarize the intended result or deliverable in one or two sentences. "
+                "Context: preserve the user's scope, exclusions, preferences, references, timing and "
+                "qualifiers. Keep each constraint with the task it applies to. If a requirement is "
+                "ambiguous, preserve it and use the note field to identify what needs clarification. "
+                "Do not guess new requirements, repeat the title as the goal, truncate the original "
+                "sentence into a title, or perform the research. Use empty context only if there are "
+                "no additional details. Goal and context allow 4000 characters each. "
+                "Return at most 24 tasks; if none are actionable return an empty list and explain why.\n\n"
+            )
         state, stopped = run_codex(jid, doc, prompt + doc["text"], on_beat)
         if stopped or not state.ok:
             settle(jid, doc, DONE if stopped else ERROR, result="[stopped]" if stopped else None,

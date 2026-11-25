@@ -14,7 +14,8 @@ import Foundation
  * reader physically cannot disagree in a demo, which is exactly the bug a
  * fixture would otherwise be very good at hiding.
  *
- * **Nothing here reaches a network.** Of everything in this app, a write that
+ * Mail and messages stay offline. The optional Mac test launcher provides a
+ * loopback Codex planner for Brain Dump. Of everything in this app, a write that
  * touched a real mailbox from a fixture is the one with consequences that
  * cannot be taken back.
  *
@@ -50,6 +51,15 @@ final class DemoStore: MailStore {
     private let chat: DemoChatStore
     private let jarvis: DemoJarvisStore
     private var intakePlans: [OvernightRun] = []
+    private let previewPlanner: LiveClient? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let value = env["CHARON_PREVIEW_PORT"], let port = UInt16(value), port > 0,
+              let token = env["CHARON_PREVIEW_TOKEN"], !token.isEmpty,
+              let url = URL(string: "http://127.0.0.1:\(port)") else { return nil }
+        return LiveClient(baseURL: url, token: token)
+    }()
+    var hasPreviewPlanner: Bool { previewPlanner != nil }
+
     private let msgs: DemoMessagesStore
 
     /// Which of the four demo payloads the console draws around the mailbox.
@@ -402,16 +412,15 @@ final class DemoStore: MailStore {
     func jarvisDays() async -> [JarvisDaySummary]? { jarvis.daySummaries() }
     func jarvisDay(_ day: String) async throws -> JarvisDay? { jarvis.day(day) }
     func processBrainDump(requestID: UUID, text: String) async throws -> String {
-        let id = requestID.uuidString.lowercased()
-        // Give the local fixture the same visible processing transition as a live proposal.
-        try await Task.sleep(for: .milliseconds(900))
-        if intakePlans.contains(where: { $0.id == id }) { return id }
-        let tasks = text.split(whereSeparator: \.isNewline).map(String.init).map {
-            ProposedTask(title: String($0.prefix(80)), goal: $0, context: "")
+        guard let planner = previewPlanner else {
+            throw OvernightSubmissionError(message: "Switch to Live in Connection to process notes on your Pi.")
         }
-        let at = Fmt.stampNow()
-        intakePlans.insert(OvernightRun(id: id, title: "Brain Dump", status: "review",
-            createdAt: at, updatedAt: at, request: text, kind: "brain_dump", proposal: tasks), at: 0)
+        let id = try await planner.processBrainDump(requestID: requestID, text: text)
+        if !intakePlans.contains(where: { $0.id == id }) {
+            let at = Fmt.stampNow()
+            intakePlans.insert(OvernightRun(id: id, title: "Brain Dump", status: "queued",
+                                            createdAt: at, updatedAt: at, request: text, kind: "brain_dump"), at: 0)
+        }
         return id
     }
 
@@ -452,7 +461,11 @@ final class DemoStore: MailStore {
     }
 
     func overnightRun(id: String) async throws -> OvernightRun? {
-        demoIntakeRuns.first { $0.id == id } ?? jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
+        if let pending = intakePlans.first(where: { $0.id == id }), pending.active, let planner = previewPlanner {
+            guard let run = try await planner.overnightRun(id: id) else { return nil }
+            if let index = intakePlans.firstIndex(where: { $0.id == id && $0.active }) { intakePlans[index] = run }
+        }
+        return demoIntakeRuns.first { $0.id == id } ?? jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
     }
 
     func overnightFile(run: String, file: String) async throws -> URL? { nil }

@@ -109,6 +109,11 @@ tasks immediately. Expand each card to review or edit its title, goal and
 context, or delete it. Choose a start time and click **Done** to queue the
 remaining tasks. Once the Pi confirms, you can close your Mac.
 
+To try the same Luna planner on a Mac with Codex CLI signed in, run
+`python3 collector/preview-brain-dump.py /path/to/Charon.app`. Process makes
+one Codex planning call for each new submission. Done keeps the reviewed tasks
+in the demo. Quit that copy of Charon to close the local test session.
+
 Each assignment has its own status, report, sources, and files. Completed runs
 stay in your history. Choose **Show earlier tasks** to load another page.
 Word documents and PDFs open in Quick Look. **Save a copy** keeps a file on

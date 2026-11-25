@@ -131,6 +131,10 @@ assert "--ephemeral" in args and "--ignore-user-config" in args
 assert "Research internships" in sys.stdin.read()
 schema = json.loads(Path(args[args.index("--output-schema")+1]).read_text())
 assert schema["required"] == ["tasks", "note"]
+if "context" in schema["properties"]["tasks"]["items"]["required"]:
+    assert args[args.index("--model")+1] == "gpt-6-luna"
+else:
+    assert "--model" not in args
 ''' + f'Path(args[args.index("--output-last-message")+1]).write_text({json.dumps(plan)!r})\n'
                         + '''print('{"type":"turn.completed","usage":{"output_tokens":7}}')\n''')
         path.chmod(0o700)
