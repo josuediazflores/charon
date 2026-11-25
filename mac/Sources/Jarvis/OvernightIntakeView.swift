@@ -165,18 +165,195 @@ private struct OvernightStartPicker: View {
         .accessibilityValue(selection.formatted(date: .complete, time: .shortened))
         .help("Change start date and time")
         .popover(isPresented: $editing, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 12) {
-                DatePicker("Start date", selection: $selection, displayedComponents: .date)
-                    .datePickerStyle(.graphical).labelsHidden()
-                Divider()
-                HStack {
-                    DatePicker("Start time", selection: $selection, displayedComponents: .hourAndMinute)
-                    Spacer(minLength: 12)
-                    Button("Close") { editing = false }.keyboardShortcut(.defaultAction)
+            StartTimeEditor(initial: selection) { date in
+                selection = date
+                editing = false
+            }
+        }
+    }
+}
+
+
+private struct StartTimeEditor: View {
+    let initial: Date
+    let apply: (Date) -> Void
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+    @State private var day: Date
+    @State private var month: Date
+    @State private var clockText = ""
+    @FocusState private var typing: Bool
+    @FocusState private var focusedDay: Date?
+
+    init(initial: Date, apply: @escaping (Date) -> Void) {
+        self.initial = initial
+        self.apply = apply
+        _day = State(initialValue: initial)
+        _month = State(initialValue: initial)
+    }
+
+    private var clockFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.timeStyle = .short
+        return formatter
+    }
+
+    private var chosenStart: Date? {
+        let value = clockText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let formatter = clockFormatter
+        let parsed: Date?
+        if let date = formatter.date(from: value) {
+            parsed = date
+        } else {
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "H:mm"
+            parsed = formatter.date(from: value)
+        }
+        guard let parsed else { return nil }
+        let hour = calendar.component(.hour, from: parsed)
+        let minute = calendar.component(.minute, from: parsed)
+        guard let date = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day),
+              calendar.isDate(date, inSameDayAs: day),
+              calendar.component(.hour, from: date) == hour,
+              calendar.component(.minute, from: date) == minute else { return nil }
+        // Preserve the originally selected occurrence during a repeated DST hour.
+        if calendar.isDate(initial, inSameDayAs: date),
+           calendar.component(.hour, from: initial) == hour,
+           calendar.component(.minute, from: initial) == minute { return initial }
+        return date
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(month, format: .dateTime.month(.wide).year()).font(FocusInk.heading(24))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                arrow(-1)
+                arrow(1)
+            }
+            monthGrid
+            Divider()
+            HStack(spacing: 10) {
+                Text("Start time").font(.headline)
+                Spacer()
+                HStack(spacing: 7) {
+                    Image(systemName: "clock").foregroundStyle(FocusInk.secondary)
+                    TextField("Time", text: $clockText).font(.body.monospacedDigit())
+                        .textFieldStyle(.plain).focused($typing)
+                        .accessibilityLabel("Start time")
+                        .onSubmit { if let date = chosenStart, date > .now { apply(date) } }
+                }
+                .padding(.horizontal, 10).frame(width: 106, height: 30)
+                .background(FocusInk.composer, in: RoundedRectangle(cornerRadius: 7))
+                .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(typing ? FocusInk.sand : FocusInk.line) }
+            }
+            HStack(spacing: 6) {
+                preset("Midnight", hour: 0)
+                preset("1 AM", hour: 1)
+                Spacer()
+                Button("Set start") { if let date = chosenStart { apply(date) } }
+                    .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
+                    .disabled(chosenStart.map { $0 <= .now } ?? true)
+            }
+            if chosenStart == nil && !clockText.isEmpty {
+                Text("Enter a valid time, such as 01:30.").font(.caption).foregroundStyle(.secondary)
+            } else if let date = chosenStart, date <= .now {
+                Text("Choose a future start.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(20).frame(width: 320)
+        .background(FocusInk.card)
+        .onAppear { clockText = clockFormatter.string(from: initial) }
+    }
+
+    private func arrow(_ offset: Int) -> some View {
+        Button {
+            if let next = calendar.date(byAdding: .month, value: offset, to: month) { month = next }
+        } label: {
+            Image(systemName: offset < 0 ? "chevron.left" : "chevron.right")
+                .font(.caption.weight(.semibold)).frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(offset < 0 && calendar.compare(month, to: .now, toGranularity: .month) != .orderedDescending)
+        .accessibilityLabel(offset < 0 ? "Previous month" : "Next month")
+    }
+
+    private var monthGrid: some View {
+        let first = calendar.dateInterval(of: .month, for: month)?.start ?? month
+        let padding = (calendar.component(.weekday, from: first) - calendar.firstWeekday + 7) % 7
+        let count = calendar.range(of: .day, in: .month, for: first)?.count ?? 31
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+            ForEach(0..<7) { index in
+                Text(calendar.shortStandaloneWeekdaySymbols[(calendar.firstWeekday - 1 + index) % 7])
+                    .font(.caption2.weight(.medium)).foregroundStyle(FocusInk.secondary)
+                    .frame(height: 22).accessibilityHidden(true)
+            }
+            ForEach(0..<(padding + count), id: \.self) { index in
+                if index < padding {
+                    Color.clear.frame(height: 30).accessibilityHidden(true)
+                } else if let date = calendar.date(byAdding: .day, value: index - padding, to: first) {
+                    dateButton(date)
                 }
             }
-            .padding(14).fixedSize().tint(FocusInk.sand)
         }
+    }
+
+    private func dateButton(_ date: Date) -> some View {
+        let selected = calendar.isDate(date, inSameDayAs: day)
+        let past = date < calendar.startOfDay(for: .now)
+        return Button { day = date } label: {
+            Text(date, format: .dateTime.day()).font(.body.monospacedDigit().weight(selected ? .bold : .regular))
+                .frame(maxWidth: .infinity).frame(height: 30)
+                .foregroundStyle(selected ? FocusInk.ground : past ? FocusInk.secondary : FocusInk.text)
+                .background(selected ? FocusInk.sand : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(past)
+        .focused($focusedDay, equals: date)
+        .onMoveCommand { direction in
+            let offset: Int
+            switch direction {
+            case .left: offset = -1
+            case .right: offset = 1
+            case .up: offset = -7
+            case .down: offset = 7
+            default: return
+            }
+            if let next = calendar.date(byAdding: .day, value: offset, to: date),
+               next >= calendar.startOfDay(for: .now) {
+                day = next
+                month = next
+                focusedDay = next
+            }
+        }
+        .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func preset(_ title: LocalizedStringKey, hour: Int) -> some View {
+        let active = chosenStart.map {
+            calendar.component(.hour, from: $0) == hour && calendar.component(.minute, from: $0) == 0
+        } ?? false
+        return Button {
+            // Format a wall-clock shortcut independently of the selected day's DST transition.
+            if let time = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: Date(timeIntervalSinceReferenceDate: 0)) {
+                clockText = clockFormatter.string(from: time)
+                typing = false
+            }
+        } label: {
+            Text(title).font(.caption.weight(.medium))
+                .padding(.horizontal, 9).frame(height: 25)
+                .foregroundStyle(active ? FocusInk.sand : FocusInk.text)
+                .overlay { Capsule().strokeBorder(active ? FocusInk.sand : FocusInk.line) }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
