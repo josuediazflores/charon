@@ -6,7 +6,7 @@ struct OvernightTasksView: View {
     let model: MailModel
 
     var body: some View {
-        OvernightRunList(store: model.store)
+        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL)
             .id(ObjectIdentifier(model.store))
     }
 }
@@ -18,8 +18,10 @@ private struct PageRequest: Equatable {
 
 private struct OvernightRunList: View {
     let store: ConsoleStore
+    let draftScope: String
     @State private var runs: [OvernightRun] = []
-    @State private var selected: OvernightRun?
+    @State private var route: [OvernightRun] = []
+    @State private var composing = false
     @State private var cursor: String?
     @State private var query = PageRequest()
     @State private var loading = true
@@ -28,8 +30,13 @@ private struct OvernightRunList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let selected {
-                RunReader(store: store, summary: selected, legacy: legacy) { self.selected = nil }
+            if let selected = route.last {
+                RunReader(store: store, summary: selected, legacy: legacy,
+                          backTitle: route.dropLast().last?.name ?? "Overnight tasks",
+                          openChild: { route.append($0) }) {
+                    route.removeLast()
+                    if route.isEmpty { query = PageRequest() }
+                }
                     .id(selected.id)
             } else {
                 ScrollView {
@@ -37,6 +44,13 @@ private struct OvernightRunList: View {
                         HStack {
                             Text("Overnight tasks").font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                             Spacer()
+                            Button { composing = true } label: {
+                                ViewThatFits {
+                                    Label("Set overnight tasks", systemImage: "plus")
+                                    Image(systemName: "plus")
+                                }
+                            }
+                            .accessibilityLabel("Set overnight tasks")
                             Button { query = PageRequest() } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel("Refresh overnight tasks").disabled(loading)
                         }
@@ -52,10 +66,10 @@ private struct OvernightRunList: View {
                             Text("No overnight tasks yet.").foregroundStyle(.secondary)
                         }
                         ForEach(runs) { run in
-                            Button { selected = run } label: {
+                            Button { route.append(run) } label: {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(run.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(FocusInk.text)
-                                    Text([run.statusLabel, dateLabel(run.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    Text(statusLine(run))
                                         .font(.callout).foregroundStyle(.secondary)
                                 }
                                 .padding(16)
@@ -72,6 +86,13 @@ private struct OvernightRunList: View {
                     .frame(maxWidth: 690, alignment: .leading).padding(32)
                     .frame(maxWidth: .infinity)
                 }
+            }
+        }
+        .sheet(isPresented: $composing) {
+            OvernightIntakeView(store: store, scope: draftScope) { plan in
+                composing = false
+                route = [plan]
+                query = PageRequest()
             }
         }
         .task(id: query) {
@@ -98,6 +119,11 @@ private func dateLabel(_ raw: String) -> String {
     Fmt.date(raw)?.formatted(date: .abbreviated, time: .shortened) ?? raw
 }
 
+private func statusLine(_ run: OvernightRun) -> String {
+    let time = run.status == "scheduled" ? run.runAt ?? run.updatedAt : run.updatedAt
+    return [run.statusLabel, dateLabel(time)].filter { !$0.isEmpty }.joined(separator: " · ")
+}
+
 private struct RunColumn<Content: View>: View {
     @ViewBuilder let content: (ScrollViewProxy) -> Content
 
@@ -116,11 +142,14 @@ private struct RunReader: View {
     let store: ConsoleStore
     let summary: OvernightRun
     let legacy: Bool
+    let backTitle: String
+    let openChild: (OvernightRun) -> Void
     let back: () -> Void
     @State private var report: OvernightRun?
     @State private var error: String?
     @State private var request = UUID()
     @State private var attachments: [RunFileLocation] = []
+    @State private var stopping = false
 
     var body: some View {
         if let report, let current = attachments.last {
@@ -130,17 +159,43 @@ private struct RunReader: View {
                 .id(current)
         } else {
             RunColumn { scroll in
-                Button(action: back) { Label("Overnight tasks", systemImage: "arrow.left") }
+                Button(action: back) { Label(backTitle, systemImage: "arrow.left") }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                 Text(summary.name).font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                 if let report {
-                    Text([report.statusLabel, dateLabel(report.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text(statusLine(report))
                         .font(.callout).foregroundStyle(.secondary)
+                    if report.isPlanning, let start = report.runAt {
+                        Text("Tasks start \(dateLabel(start))").foregroundStyle(.secondary)
+                    }
+                    if report.status == "scheduled", report.parentId != nil {
+                        Button(stopping ? "Stopping…" : "Stop scheduled task") {
+                            Task { await stopScheduledTask() }
+                        }
+                        .disabled(stopping)
+                    }
                     if let message = report.error, !message.isEmpty { Text(message).textSelection(.enabled) }
                     if let markdown = report.markdown, !markdown.isEmpty {
                         RunMarkdown(markdown: markdown, run: report, scroll: scroll, follow: { attachments.append($0) })
-                    } else {
+                    } else if report.isPlanning && report.active {
+                        Text("Jarvis is preparing your tasks.").foregroundStyle(.secondary)
+                    } else if report.status != "scheduled" && report.status != "stopped" {
                         Text("This run has no saved report yet.").foregroundStyle(.secondary)
+                    }
+                    if let children = report.children, !children.isEmpty {
+                        Text("Tasks").font(.title2.weight(.semibold))
+                        ForEach(children) { child in
+                            Button { openChild(child) } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(child.name).font(.headline)
+                                        Text(statusLine(child)).font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }.padding(12).focusCard().contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
                     }
                     if let prompt = report.request, !prompt.isEmpty {
                         DisclosureGroup("Original request") { Text(prompt).textSelection(.enabled) }
@@ -168,28 +223,50 @@ private struct RunReader: View {
                         Text("This collector supplies the saved job excerpt. Run files require the run reader on the Pi.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
-                } else if let error {
+                } else if error == nil {
+                    ProgressView().controlSize(.small)
+                }
+                if let error {
                     Text(error).foregroundStyle(.secondary)
                     Button("Try again") { request = UUID() }
-                } else {
-                    ProgressView().controlSize(.small)
                 }
             }
             .task(id: request) {
-                // On returning from a linked file, keep the report and its manifest together.
-                if report != nil { return }
                 error = nil
                 do {
-                    let value: OvernightRun?
-                    if summary.fromJobList { value = summary }
-                    else { value = try await store.overnightRun(id: summary.id) }
-                    try Task.checkCancellation()
-                    guard let value else { error = "This run is no longer available on the Pi."; return }
-                    report = value
+                    while !Task.isCancelled {
+                        let value: OvernightRun?
+                        if summary.fromJobList { value = summary }
+                        else { value = try await store.overnightRun(id: summary.id) }
+                        try Task.checkCancellation()
+                        guard let value else { error = "This run is no longer available on the Pi."; return }
+                        report = value
+                        guard !summary.fromJobList else { return }
+                        let related = [value] + (value.children ?? [])
+                        let delay: TimeInterval
+                        if related.contains(where: \.active) {
+                            delay = 3
+                        } else if let start = related.filter({ $0.status == "scheduled" })
+                            .compactMap({ Fmt.date($0.runAt) }).min() {
+                            delay = max(3, min(60, start.timeIntervalSinceNow))
+                        } else { return }
+                        try await Task.sleep(for: .seconds(delay))
+                    }
                 } catch {
                     if !Task.isCancelled { self.error = error.localizedDescription }
                 }
             }
+        }
+    }
+
+    private func stopScheduledTask() async {
+        guard !stopping else { return }
+        stopping = true
+        defer { stopping = false }
+        if case .ok = await store.jarvisJobStop(id: summary.id) {
+            request = UUID()
+        } else {
+            error = "Couldn’t stop this task. Check your connection and try again."
         }
     }
 }

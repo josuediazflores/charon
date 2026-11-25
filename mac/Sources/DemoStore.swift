@@ -49,6 +49,7 @@ final class DemoStore: MailStore {
     /// the same reason the ask threads are held here.
     private let chat: DemoChatStore
     private let jarvis: DemoJarvisStore
+    private var intakePlans: [OvernightRun] = []
     private let msgs: DemoMessagesStore
 
     /// Which of the four demo payloads the console draws around the mailbox.
@@ -400,12 +401,54 @@ final class DemoStore: MailStore {
     func jarvisToday() async throws -> JarvisDay? { jarvis.todayRecord() }
     func jarvisDays() async -> [JarvisDaySummary]? { jarvis.daySummaries() }
     func jarvisDay(_ day: String) async throws -> JarvisDay? { jarvis.day(day) }
+    func submitOvernightTasks(requestID: UUID, text: String, runAt: Date) async throws -> String {
+        let id = requestID.uuidString.lowercased()
+        let start = ISO8601DateFormatter().string(from: runAt)
+        if let existing = intakePlans.first(where: { $0.id == id }) {
+            guard existing.request == text, existing.runAt == start else {
+                throw OvernightSubmissionError(message: "This request already has a different plan.")
+            }
+            return id
+        }
+        let at = Fmt.stampNow()
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let children = lines.map { line in
+            OvernightRun(id: UUID().uuidString.lowercased(), title: String(line.prefix(80)),
+                         status: "scheduled", createdAt: at, updatedAt: at, request: line,
+                         parentId: id, runAt: start)
+        }
+        let plan = OvernightRun(id: id, title: "Plan overnight tasks", status: "done", createdAt: at,
+                                updatedAt: at, request: text,
+                                markdown: "In this demo, each line becomes a task. On the Pi, Codex reads the whole description and splits it into assignments.",
+                                kind: "intake", runAt: start, children: children)
+        intakePlans.insert(plan, at: 0)
+        return id
+    }
+
+    private var demoIntakeRuns: [OvernightRun] {
+        intakePlans.flatMap { original -> [OvernightRun] in
+            var plan = original
+            let children = (plan.children ?? []).map { original -> OvernightRun in
+                var child = original
+                if child.status == "scheduled", let date = Fmt.date(child.runAt), date <= Date() {
+                    child.status = "done"
+                    child.markdown = "This is a sample report for the scheduled demo task."
+                    child.updatedAt = child.runAt ?? child.updatedAt
+                }
+                return child
+            }
+            plan.children = children
+            return [plan] + children
+        }
+    }
+
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
-        OvernightRunPage(runs: jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
+        OvernightRunPage(runs: demoIntakeRuns + jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
     }
 
     func overnightRun(id: String) async throws -> OvernightRun? {
-        jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
+        demoIntakeRuns.first { $0.id == id } ?? jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
     }
 
     func overnightFile(run: String, file: String) async throws -> URL? { nil }
@@ -425,7 +468,16 @@ final class DemoStore: MailStore {
         jarvis.file(text: text, title: title)
     }
 
-    func jarvisJobStop(id: String) async -> WriteResult { jarvis.stopJob(id) }
+    func jarvisJobStop(id: String) async -> WriteResult {
+        for plan in intakePlans.indices {
+            if let index = intakePlans[plan].children?.firstIndex(where: { $0.id == id }) {
+                intakePlans[plan].children?[index].status = "stopped"
+                intakePlans[plan].children?[index].updatedAt = Fmt.stampNow()
+                return .ok
+            }
+        }
+        return jarvis.stopJob(id)
+    }
 
     /// **Nil is the honest demo answer.** There is no Mac behind a fixture, so
     /// the voice degrades exactly as it does when the real one is asleep -- which

@@ -4,18 +4,23 @@ import Foundation
 struct OvernightRun: Decodable, Identifiable {
     let id: String
     let title: String
-    let status: String
+    var status: String
     let createdAt: String
-    let updatedAt: String
+    var updatedAt: String
     var request: String?
     var markdown: String?
     var error: String?
     var sources: [Source]?
     var files: [File]?
+    var kind: String?
+    var parentId: String?
+    var runAt: String?
+    var children: [OvernightRun]?
     var fromJobList = false
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, createdAt, updatedAt, request, markdown, error, sources, files
+        case kind, parentId, runAt, children
     }
 
     struct Source: Decodable, Hashable {
@@ -32,9 +37,11 @@ struct OvernightRun: Decodable, Identifiable {
     }
 
     var name: String { title.isEmpty ? (request?.prefix(90)).map(String.init) ?? id : title }
+    var isPlanning: Bool { kind == "intake" }
+    var active: Bool { ["idle", "queued", "running"].contains(status) }
     var statusLabel: String {
         switch status {
-        case "done": return "Completed"
+        case "done": return isPlanning ? "Plan ready" : "Completed"
         case "error": return "Failed"
         case "needs-input": return "Needs input"
         default: return status.replacingOccurrences(of: "_", with: " ").capitalized
@@ -86,6 +93,20 @@ struct OvernightRun: Decodable, Identifiable {
         }
         return files?.first { $0.path == path.joined(separator: "/") }
     }
+}
+
+enum OvernightIntake {
+    static let textLimit = 12_000
+
+    static func nextStart(after date: Date = Date(), calendar: Calendar = .current) -> Date {
+        calendar.nextDate(after: date, matching: DateComponents(hour: 1, minute: 0, second: 0),
+                          matchingPolicy: .nextTime) ?? date.addingTimeInterval(86_400)
+    }
+}
+
+struct OvernightSubmissionError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 struct OvernightRunPage: Decodable {

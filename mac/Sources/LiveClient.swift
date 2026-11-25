@@ -493,6 +493,25 @@ final class LiveClient: MailStore {
         try await fetch("v1/jarvis/day/\(day)", as: JarvisDay.self)
     }
 
+    func submitOvernightTasks(requestID: UUID, text: String, runAt: Date) async throws -> String {
+        let body = ["request_id": requestID.uuidString.lowercased(), "text": text,
+                    "run_at": ISO8601DateFormatter().string(from: runAt)]
+        let (data, response) = try await session.data(for: request("v1/jarvis/intake", method: "POST", json: body))
+        let code = try check(response)
+        guard code == 202 else {
+            struct CollectorError: Decodable { let error: String }
+            let reason = (try? JSONDecoder().decode(CollectorError.self, from: data))?.error
+            if code == 404 || code == 405 {
+                throw OvernightSubmissionError(message: "Update the Pi collector to set overnight tasks.")
+            }
+            throw OvernightSubmissionError(message: reason ?? "The collector returned HTTP \(code).")
+        }
+        struct Receipt: Decodable { let id: String }
+        let id = try JSONDecoder().decode(Receipt.self, from: data).id
+        guard OvernightRun.validID(id) else { throw MailError.badKey }
+        return id
+    }
+
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
         let query = cursor.map { [URLQueryItem(name: "before", value: $0)] } ?? []
         let (data, response) = try await session.data(for: request("v1/jarvis/runs", query: query))

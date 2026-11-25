@@ -28,6 +28,9 @@ Run:  python3 collector.py serve
 
 from feature_control import FEATURES, FeatureControl, admit, feature_access
 import jarvis_runs
+import jarvis_intake
+from pathlib import Path
+import jarvis_schedule
 
 import argparse
 import hashlib
@@ -4194,8 +4197,14 @@ class Collector:
 
     def run(self):
         last_save = 0.0
+        next_scheduled_check = 0.0
         while not self.stop.is_set():
             now = time.monotonic()
+            if now >= next_scheduled_check:
+                with admit("jarvis") as allowed:
+                    if allowed:
+                        jarvis_schedule.promote_due(self.jarvis_dir())
+                next_scheduled_check = now + 10
             for name, src in self.sources.items():
                 if now >= src.next_at:
                     with admit(name) as allowed:
@@ -6104,8 +6113,12 @@ class Collector:
                 "status": "idle",
                 "error": None,
             }
-            if not write_atomic(jpath, json.dumps(job, indent=2)):
-                return None, "cannot write the job", 500
+            try:
+                job_path = Path(jpath)
+                job_path.parent.mkdir(parents=True, exist_ok=True)
+                jarvis_intake.atomic_json(job_path, job, exclusive=True)
+            except OSError:
+                return None, "cannot create the job record", 500
 
             doc["turns"].append(self.jarvis_card(job, now))
             doc["updated_at"] = now
@@ -6127,6 +6140,22 @@ class Collector:
                 # exactly what happened.
                 return None, f"cannot queue the job: {exc.strerror or exc}", 500
             return jid, None, None
+
+    def jarvis_intake(self, body):
+        try:
+            key, text, run_at = jarvis_intake.parse_request(body)
+            root = self.jarvis_dir()
+            if not root:
+                return None, "chat.base_dir is unset", 503
+            with self._jarvis_lock:
+                jid = jarvis_intake.file_once(root, key, jarvis_intake.TITLE, text, run_at)
+            return jid, None, None
+        except jarvis_intake.RequestConflict as exc:
+            return None, str(exc), 409
+        except ValueError as exc:
+            return None, str(exc), 400
+        except OSError:
+            return None, "Could not file the overnight plan. Retry the same request.", 500
 
     def jarvis_job_stop(self, jid):
         """Ask the job runner to abandon one job. Returns (True, None, None) or
@@ -9589,6 +9618,14 @@ def make_handler(collector, token):
 
             if path == JARVIS_TTS_WARM_ROUTE:
                 return self._jarvis_tts_warm()
+
+            if path == "/v1/jarvis/intake":
+                # An escaped non-BMP character takes 12 bytes in a JSON string.
+                doc, why = self._read_body(jarvis_intake.MAX_INPUT * 12 + 1024)
+                if why:
+                    return self._json(400, {"error": why})
+                jid, why, code = collector.jarvis_intake(doc)
+                return self._json(code or 202, {"error": why} if why else {"id": jid})
 
             if path in JARVIS_POST_ROUTES:
                 return self._jarvis(path)

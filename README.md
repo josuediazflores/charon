@@ -103,10 +103,16 @@ its own memory.
 running as jobs in a second lane that never blocks the conversation. The orb is
 a 1-bit dither and its state is the session's state.
 
-In the Mac sidebar, expand **Jarvis** and select **Overnight tasks**. In Live
-mode this lists saved jobs from your connected Pi. Open a run to read its
-result, follow a source, or open an archived Markdown note. Word documents
-and PDFs open in Quick Look. **Save a copy** keeps a file on your Mac.
+In **Jarvis → Overnight tasks**, choose **Set overnight tasks**, describe what
+you want done, and pick a start date and time. The Pi uses Codex to separate
+the request into assignments as soon as you submit it. You can close your Mac
+after the Pi accepts the request. At the chosen time, the Pi starts the
+assignments as the research worker becomes available.
+
+Each assignment has its own status, report, sources, and files. Completed runs
+stay in your history. Choose **Show earlier tasks** to load another page.
+Word documents and PDFs open in Quick Look. **Save a copy** keeps a file on
+your Mac.
 
 With an older collector, Charon reads its recent job list and the result text
 it already provides. Full reports, older pages and archived files use the
@@ -499,12 +505,13 @@ missing directory sits inactive forever while looking healthy.
 
 ```sh
 mkdir -p ~/halftone-chat/{bin,memory,threads/.queue,threads/.stop}
-mkdir -p ~/halftone-chat/jarvis/{days,jobs,.say,.jobs,.stop,.jobstop}
+mkdir -p ~/halftone-chat/jarvis/{days,jobs,.say,.jobs,.stop,.jobstop,.intake-jobs,.scheduled}
 mkdir -p ~/halftone-chat/{env,sayenv,jobenv}/.claude
 
 cp collector/chat-runner.py       ~/halftone-chat/bin/
 cp collector/jarvis-say-runner.py ~/halftone-chat/bin/
 cp collector/jarvis-job-runner.py ~/halftone-chat/bin/
+cp collector/jarvis_intake.py     ~/halftone-chat/bin/
 cp collector/jarvis-job-file.py   ~/halftone-chat/bin/jarvis-job
 cp collector/memory-tool.py       ~/halftone-chat/bin/memory
 cp collector/memory-taint.py      ~/halftone-chat/bin/memory-taint
@@ -520,10 +527,16 @@ cp collector/jarvis-job-env/settings.json ~/halftone-chat/jobenv/.claude/
 sudo cp collector/halftone-chat.{service,path} /etc/systemd/system/
 sudo cp collector/halftone-jarvis-say.{service,path} /etc/systemd/system/
 sudo cp collector/halftone-jarvis-job.{service,path} /etc/systemd/system/
+sudo cp collector/halftone-jarvis-intake.{service,path} /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo python3 collector/install-feature-control.py --user pi --feature jarvis --extend-pairs \
+  --pair halftone-jarvis-say.path:halftone-jarvis-say.service \
+  --pair halftone-jarvis-job.path:halftone-jarvis-job.service \
+  --pair halftone-jarvis-intake.path:halftone-jarvis-intake.service
 sudo systemctl enable --now halftone-chat.path
 sudo systemctl enable --now halftone-jarvis-say.path
 sudo systemctl enable --now halftone-jarvis-job.path
+sudo systemctl enable --now halftone-jarvis-intake.path
 ```
 
 The three helpers are copied without their `.py` extension on purpose: the allow

@@ -13,6 +13,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user", required=True, help="collector service account")
     parser.add_argument("--feature", choices=FEATURES, required=True)
+    parser.add_argument("--extend-pairs", action="store_true",
+                        help="Allow adding trigger/worker pairs to the existing registration")
     parser.add_argument("--service", action="append", default=[])
     parser.add_argument("--bridge", action="append", default=[], help="Registered Messages Bridge hostname without .local")
     parser.add_argument("--no-bridge", action="store_true", help="Confirm there is no Messages Bridge")
@@ -57,7 +59,14 @@ def main():
     manifest = json.dumps(config, indent=2) + "\n"
     MANIFEST = CONFIG_DIR / f"{args.feature}-units.json"
     if MANIFEST.exists() and MANIFEST.read_text() != manifest:
-        parser.error("Existing registration differs. Review it before replacing its scope.")
+        old = json.loads(MANIFEST.read_text())
+        if isinstance(old, list):
+            old = {"pairs": old}
+        new = config if isinstance(config, dict) else {"pairs": config}
+        if (not args.extend_pairs or not pairs_from(old["pairs"]).items() <= pairs.items()
+                or set(old.get("services", [])) != set(new.get("services", []))
+                or set(old.get("bridges", [])) != set(new.get("bridges", []))):
+            parser.error("Registration differs. --extend-pairs can only add trigger/worker pairs.")
     for unit in units:
         directory = Path("/etc/systemd/system") / (unit + ".d")
         directory.mkdir(exist_ok=True)

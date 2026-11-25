@@ -9,6 +9,21 @@ struct TestOvernightRuns {
         """#.utf8))
         let legacy = OvernightRun.legacy(oldJob)
         precondition(legacy.status == "done" && legacy.fromJobList)
+        let plan = try decoder.decode(OvernightRun.self, from: Data(#"""
+        {"id":"plan-a","title":"Plan overnight tasks","status":"done","created_at":"","updated_at":"",
+         "kind":"intake","run_at":"2026-11-25T09:00:00Z","children":[
+         {"id":"task-a","title":"Research internships","status":"scheduled","created_at":"","updated_at":"",
+          "parent_id":"plan-a","run_at":"2026-11-25T09:00:00Z"}]}
+        """#.utf8))
+        precondition(plan.statusLabel == "Plan ready" && plan.children?.first?.parentId == plan.id)
+        precondition(plan.children?.first?.runAt == plan.runAt && plan.children?.first?.statusLabel == "Scheduled")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let iso = ISO8601DateFormatter()
+        let beforeOne = iso.date(from: "2026-11-24T08:59:00Z")!
+        let afterOne = iso.date(from: "2026-11-24T09:01:00Z")!
+        precondition(iso.string(from: OvernightIntake.nextStart(after: beforeOne, calendar: calendar)) == "2026-11-24T09:00:00Z")
+        precondition(iso.string(from: OvernightIntake.nextStart(after: afterOne, calendar: calendar)) == "2026-11-25T09:00:00Z")
         precondition(legacy.sources?.first?.url == "https://example.org/report")
         let page = try decoder.decode(OvernightRunPage.self, from: Data(#"""
         {"runs":[{"id":"run-a","title":"Task","status":"done","created_at":"2026-11-22","updated_at":"2026-11-23"}],"next_cursor":"run-a"}

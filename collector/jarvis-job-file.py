@@ -28,11 +28,12 @@ touches a day record or another job's file.
 Stdlib only, like everything else on this box.
 """
 
-import json
 import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
+from jarvis_intake import atomic_json
 
 BASE = os.environ.get("CHAT_BASE") or "/home/pi/halftone-chat"
 JOBS_DIR = os.path.join(BASE, "jarvis", "jobs")
@@ -104,12 +105,9 @@ def main():
     # Atomic for the reason every record write on this box is: the job runner
     # scans this directory, and a half-written record read mid-scan costs its
     # own row.
-    path = os.path.join(JOBS_DIR, f"{jid}.json")
-    tmp = f"{path}.tmp"
+    path = Path(JOBS_DIR, f"{jid}.json")
     try:
-        with open(tmp, "w") as fh:
-            json.dump(job, fh, indent=2)
-        os.replace(tmp, path)
+        atomic_json(path, job, exclusive=True)
     except OSError as exc:
         die(f"cannot write the job: {exc.strerror or exc}")
 

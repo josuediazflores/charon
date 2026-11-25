@@ -74,12 +74,28 @@ def _text(doc, key):
     return value if isinstance(value, str) else ""
 
 
-def row(doc, queued):
+def row(root, doc, queued):
+    jid = doc["id"]
     status = _text(doc, "status")
-    if status == "idle" and queued(doc["id"]):
-        status = "queued"
-    return {"id": doc["id"], "title": _text(doc, "title"), "status": status,
-            "created_at": _text(doc, "created_at"), "updated_at": _text(doc, "updated_at")}
+    result = {"id": jid, "title": _text(doc, "title"),
+              "created_at": _text(doc, "created_at"), "updated_at": _text(doc, "updated_at")}
+    parent = _text(doc, "parent_id")
+    planner = doc.get("kind") == "intake"
+    if planner:
+        result["kind"] = "intake"
+    if JOB_ID.fullmatch(parent):
+        result["parent_id"] = parent
+    if planner or parent:
+        result["run_at"] = _text(doc, "run_at")
+    if parent and ((status == "idle" and os.path.isfile(os.path.join(root, ".jobstop", jid)))
+                   or (status == "done" and _text(doc, "result") == "[stopped]")):
+        status = "stopped"
+    if status == "idle":
+        if queued(jid) or (planner and os.path.isfile(os.path.join(root, ".intake-jobs", jid))):
+            status = "queued"
+        elif parent and os.path.isfile(os.path.join(root, ".scheduled", jid + ".json")):
+            status = "scheduled"
+    return {**result, "status": status}
 
 
 def list_runs(root, queued, before, page_size):
@@ -95,7 +111,7 @@ def list_runs(root, queued, before, page_size):
     rows = []
     for jid in ids:
         try:
-            rows.append(row(job_doc(root, jid), queued))
+            rows.append(row(root, job_doc(root, jid), queued))
         except (FileNotFoundError, RunError):
             continue  # One incomplete, obsolete or concurrently removed record.
         if len(rows) == page_size + 1:
@@ -169,8 +185,20 @@ def report_text(root, doc):
 def detail(root, queued, jid):
     doc = job_doc(root, jid)
     markdown = report_text(root, doc)
-    return {**row(doc, queued), "request": _text(doc, "text"), "error": _text(doc, "error") or None,
-            "markdown": markdown, "sources": sources(markdown), "files": _file_rows(root, jid)}
+    result = {**row(root, doc, queued), "request": _text(doc, "text"), "error": _text(doc, "error") or None,
+              "markdown": markdown, "sources": sources(markdown), "files": _file_rows(root, jid)}
+    if doc.get("kind") == "intake":
+        result["children"] = []
+        for child in doc.get("children", []):
+            if not isinstance(child, str) or not JOB_ID.fullmatch(child):
+                continue
+            try:
+                record = job_doc(root, child)
+            except (FileNotFoundError, RunError):
+                continue
+            if record.get("parent_id") == jid:
+                result["children"].append(row(root, record, queued))
+    return result
 
 
 def open_file(root, jid, file_id):

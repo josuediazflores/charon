@@ -64,6 +64,7 @@ optional Claude backend still uses the existing jobenv/ permission settings.
 """
 
 import collections
+import jarvis_intake
 import fcntl
 import json
 import os
@@ -95,6 +96,7 @@ from pathlib import Path
 BASE = os.environ.get("CHAT_BASE") or "/home/pi/halftone-chat"
 JARVIS_DIR = os.path.join(BASE, "jarvis")
 JOBS_DIR = os.path.join(JARVIS_DIR, "jobs")
+INTAKE_LANE = False
 QUEUE_DIR = os.path.join(JARVIS_DIR, ".jobs")
 STOP_DIR = os.path.join(JARVIS_DIR, ".jobstop")
 LOCK_PATH = os.path.join(JARVIS_DIR, ".jobs.lock")
@@ -673,6 +675,26 @@ CODEX_FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,119}\.(?:md|csv|json|
 CODEX_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 
 
+PLAN_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["tasks", "note"],
+    "properties": {
+        "note": {"type": "string"},
+        "tasks": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["title", "text"],
+            "properties": {"title": {"type": "string"}, "text": {"type": "string"}}
+        }}
+    }
+}
+
+
+def codex_output(path):
+    with open(path, "rb") as f:
+        data = f.read(CODEX_MAX_OUTPUT_BYTES + 1)
+    if len(data) > CODEX_MAX_OUTPUT_BYTES:
+        raise ValueError("Codex output exceeds the 2 MiB limit")
+    return json.loads(data.decode("utf-8"))
+
+
 class CodexState(StreamState):
     def __init__(self):
         super().__init__()
@@ -702,11 +724,7 @@ class CodexState(StreamState):
                           else "Codex could not complete this turn")
 
     def read_output(self, path):
-        with open(path, "rb") as f:
-            data = f.read(CODEX_MAX_OUTPUT_BYTES + 1)
-        if len(data) > CODEX_MAX_OUTPUT_BYTES:
-            raise ValueError("Codex output exceeds the 2 MiB report limit")
-        result = json.loads(data.decode("utf-8"))
+        result = codex_output(path)
         if not isinstance(result, dict) or not isinstance(result.get("markdown"), str):
             raise ValueError("Codex returned no Markdown report")
         markdown = result["markdown"].strip()
@@ -729,14 +747,21 @@ class CodexState(StreamState):
         self.files = files
 
 
+class PlanState(CodexState):
+    def read_output(self, path):
+        self.plan = jarvis_intake.validate_plan(codex_output(path))
+
+
 def run_codex(jid, doc, prompt, on_beat):
-    state = CodexState()
+    planning = doc.get("kind") == "intake"
+    state = PlanState() if planning else CodexState()
     with tempfile.TemporaryDirectory(prefix="jarvis-research-") as workspace:
         schema = Path(workspace, "response-schema.json")
-        schema.write_text(json.dumps(CODEX_SCHEMA), encoding="utf-8")
+        schema.write_text(json.dumps(PLAN_SCHEMA if planning else CODEX_SCHEMA), encoding="utf-8")
         output = Path(workspace, "response.json")
         cmd = [
-            CODEX, "--strict-config", "--search", "--ask-for-approval", "never",
+            CODEX, "--strict-config", *(["-c", 'web_search="disabled"'] if planning else ["--search"]),
+            "--ask-for-approval", "never",
             "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
             "--disable", "multi_agent", "-c", 'forced_login_method="chatgpt"',
             "-c", 'default_permissions="jarvis"',
@@ -750,7 +775,7 @@ def run_codex(jid, doc, prompt, on_beat):
         # collector credentials, SSH agent, or user-provided model/API overrides.
         env = {"HOME": workspace, "CODEX_HOME": CODEX_HOME, "PATH": os.defpath,
                "LANG": "C.UTF-8", "TERM": "dumb"}
-        log(f"{jid}: starting Codex research")
+        log(f"{jid}: starting Codex {'planner' if planning else 'research'}")
         state, stopped = run_cli(jid, prompt, on_beat, state, cmd, workspace, env, "codex")
         if state.ok and not stopped:
             try:
@@ -1053,6 +1078,52 @@ def settle(jid, doc, status, result=None, error=None, elapsed_s=0.0, usage=None)
     return True
 
 
+PLAN_PROMPT = f"""Separate this description into the independent assignments the user actually requested.
+Preserve constraints, references, requested outputs, and the relevant shared context in each assignment.
+Combine steps that need each other's results in a single assignment. Avoid adding new assignments, a second
+planning task, or recurring schedules. The system supplies the start time and runs each assignment separately.
+Return a short title (max 80 characters) and self-contained instructions (max 4000 characters) for each.
+Use the note to explain any ambiguity or work you could not schedule. If there are no actionable requests,
+or the request cannot fit within {jarvis_intake.MAX_TASKS} tasks without losing work, return an empty tasks
+array and explain why. Do not perform the assignments. User description:
+
+"""
+
+
+def plan_intake(jid, doc, on_beat):
+    """Checkpoint the model's plan before filing any child. File each slot exactly once."""
+    if "plan" not in doc:
+        state, stopped = run_codex(jid, doc, PLAN_PROMPT + doc["text"], on_beat)
+        if stopped or not state.ok:
+            settle(jid, doc, DONE if stopped else ERROR, result="[stopped]" if stopped else None,
+                   error=None if stopped else (state.error or "Could not prepare the plan")[:300],
+                   usage=state.usage, elapsed_s=state.duration_s)
+            return
+        doc.update(plan=state.plan, children=[], usage=state.usage, elapsed_s=state.duration_s)
+        jarvis_intake.atomic_json(Path(job_path(jid)), doc)
+    plan = doc["plan"]
+    for slot, task in enumerate(plan["tasks"]):
+        if slot < len(doc["children"]):
+            continue
+        if stop_requested(jid):
+            settle(jid, doc, DONE, result="[stopped]", usage=doc.get("usage"), elapsed_s=doc.get("elapsed_s"))
+            return
+        child_id = jarvis_intake.file_once(JARVIS_DIR, f"{jid}-{slot}", task["title"],
+                                           task["text"], doc["run_at"], parent_id=jid)
+        doc["children"].append(child_id)
+        jarvis_intake.atomic_json(Path(job_path(jid)), doc)
+
+    parts = [f"Scheduled {len(plan['tasks'])} tasks for {doc['run_at']}."] if plan["tasks"] else []
+    for task in plan["tasks"]:
+        parts.extend(["## " + task["title"], task["text"]])
+    if plan["note"]:
+        parts.append(plan["note"])
+    markdown = "\n\n".join(parts)
+    with run_files(jid) as files_fd:
+        archive_report(files_fd, markdown)
+    settle(jid, doc, DONE, result=markdown, elapsed_s=doc.get("elapsed_s"), usage=doc.get("usage"))
+
+
 def run(jid):
     """Run one queued job. The spool entry is dropped either way."""
     doc = read_job(jid)
@@ -1063,6 +1134,11 @@ def run(jid):
         log(f"{jid}: no readable job record; dropping the spool entry")
         unspool(jid)
         clear_stop(jid)
+        return
+
+    planner = doc.get("kind") == "intake"
+    if planner != INTAKE_LANE or (doc.get("intake_key") and doc.get("status") in (DONE, ERROR)):
+        unspool(jid)
         return
 
     text = str(doc.get("text") or "").strip()
@@ -1090,7 +1166,7 @@ def run(jid):
 
     # `running` is this process's first write, and it is true the moment it is
     # made: the subprocess starts a few lines below.
-    doc["provider"] = JOB_BACKEND
+    doc["provider"] = "codex" if planner else JOB_BACKEND
     doc["status"] = RUNNING
     doc["error"] = None
     doc["updated_at"] = stamp()
@@ -1113,6 +1189,10 @@ def run(jid):
         fresh["status"] = RUNNING
         fresh["updated_at"] = stamp()
         write_job(jid, fresh)
+
+    if planner:
+        plan_intake(jid, doc, on_beat)
+        return
 
     if JOB_BACKEND == "codex":
         execute = run_codex
@@ -1222,7 +1302,15 @@ def drain():
 
 
 def main():
-    if JOB_BACKEND == "claude" and not os.path.isdir(ENV_DIR):
+    global INTAKE_LANE, QUEUE_DIR, LOCK_PATH
+    if sys.argv[1:] == ["--intake"]:
+        INTAKE_LANE = True
+        QUEUE_DIR = os.path.join(JARVIS_DIR, ".intake-jobs")
+        LOCK_PATH = os.path.join(JARVIS_DIR, ".intake.lock")
+    elif sys.argv[1:]:
+        log("usage: jarvis-job-runner.py [--intake]")
+        return 2
+    if not INTAKE_LANE and JOB_BACKEND == "claude" and not os.path.isdir(ENV_DIR):
         # The session's working directory is where its permission allowlist
         # lives. Without it claude would run in whatever directory this process
         # happened to start in, under whatever settings it found there, which is

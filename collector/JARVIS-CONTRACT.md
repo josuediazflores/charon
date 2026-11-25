@@ -183,6 +183,36 @@ original bytes, including larger reports. Supported formats are Markdown,
 text, CSV, JSON, PDF, DOCX, JPEG and PNG. Symbolic links and files with multiple
 hard links are excluded. Legacy runs can have an empty file list.
 
+### Overnight task descriptions
+
+The Mac submits an authenticated `POST /v1/jarvis/intake` with `request_id`
+(UUID), `text` (up to 12,000 characters) and `run_at` (a future RFC3339
+timestamp with timezone). A 202 response includes the planner run's `id`.
+Retry a lost response with the same UUID and input, even after the selected
+time. A conflicting reuse returns 409. Each accepted description is one batch.
+
+The dedicated intake watcher drains `jarvis/.intake-jobs` with
+`jarvis-job-runner.py --intake`, independently of active research. The planner
+calls Codex with search disabled and checkpoints the instructions before it
+creates the scheduled child records. A plan can contain up to 24 independent
+tasks. Its Markdown report explains any unresolved requests. Child records keep
+their parent ID and the selected start time. The collector promotes due tasks
+into the existing research queue when Jarvis is enabled; after downtime it
+also picks up overdue tasks. Each child has its own status, report and files.
+Stopping a child before its start suppresses the research call.
+
+Summaries and details include `kind: "intake"` for planner runs, `parent_id` for
+child runs and `run_at` for both. A planner detail includes `children` as run
+summaries in plan order. The planner's completion records dispatch. The child
+statuses show when research actually finishes.
+
+Install `jarvis_intake.py` beside both the collector and the installed worker,
+and `jarvis_schedule.py` beside the collector. Install the updated
+`jarvis-job-file.py` as the existing `bin/jarvis-job` helper. Register the
+new intake service and path with the complete existing Jarvis feature inventory
+using the README registration command before enabling the path. Disable the
+path and stop the planner service to stop accepting work from its spool.
+
 ### Writes
 
 | route | body | does |
