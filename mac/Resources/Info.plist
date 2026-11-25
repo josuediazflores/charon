@@ -37,6 +37,10 @@
 	<string>public.app-category.productivity</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Charon uses your microphone when you choose Dictate to write a Brain Dump or a message to Jarvis.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Charon transcribes your dictation on this Mac so you can review and edit it.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSHumanReadableCopyright</key>

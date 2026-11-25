@@ -7,6 +7,7 @@ from http.server import ThreadingHTTPServer
 import importlib.util
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 import threading
@@ -57,7 +58,7 @@ class OvernightIntake(unittest.TestCase):
                          body=json.dumps(body).encode() if body is not None else None, headers=headers)
             res = conn.getresponse()
             raw = res.read()
-            return res.status, json.loads(raw) if raw and res.headers.get_content_type() == "application/json" else None
+            return res.status, json.loads(raw) if raw and res.headers.get_content_type() == "application/json" else raw
         finally:
             conn.close()
 
@@ -190,7 +191,8 @@ else:
         plan = {"tasks": [{"title": "Roles", "goal": "Find internships", "context": "Chicago"},
                           {"title": "Trains", "goal": "Compare service", "context": ""}], "note": ""}
         kept = [{"title": "Summer roles", "goal": "List SWE internships", "context": "Chicago only"}]
-        choice = {"id": jid, "tasks": kept, "run_at": self.body["run_at"]}
+        overnight = (datetime.now() + timedelta(days=1)).replace(hour=1, minute=0, second=0, microsecond=0).astimezone()
+        choice = {"id": jid, "tasks": kept, "run_at": overnight.astimezone(timezone.utc).isoformat()}
         self.assertEqual(self.http(confirm, choice)[0], 409)
         with self.fake(plan):
             worker.run(jid)
@@ -221,6 +223,55 @@ else:
         child = self.http("/v1/jarvis/runs/" + done["children"][0]["id"])[1]
         self.assertEqual(child["request"], "List SWE internships\n\n## Context\n\nChicago only")
         self.assertEqual(child["status"], "scheduled")
+
+        queue = self.root / ".jobs"
+        promote_due(self.root, overnight - timedelta(seconds=1))
+        self.assertEqual(list(queue.iterdir()), [])
+        promote_due(self.root, overnight)
+        self.assertEqual(list(queue.iterdir()), [queue / child["id"]])
+
+        finding = "Two employers list summer internships in Chicago."
+        source = "https://example.org/internships"
+        csv = "Employer,Role\nExample,Summer intern\n"
+        markdown = f"# Summer roles\n\n{finding}\n\n[Employer listings]({source}) · [Shortlist](roles.csv)"
+        result = {"markdown": markdown, "files": [{"name": "roles.csv", "content": csv}]}
+        cli = self.base / "codex-research"
+        cli.write_text(f"#!{sys.executable}\n"
+                       "import sys\nfrom pathlib import Path\n"
+                       "assert '--search' in sys.argv\n"
+                       f"assert sys.stdin.read().endswith({child['request']!r})\n"
+                       f"Path(sys.argv[sys.argv.index('--output-last-message') + 1]).write_text({json.dumps(result)!r})\n"
+                       "print('{\"type\":\"turn.completed\"}')\n")
+        cli.chmod(0o700)
+        completed = overnight + timedelta(minutes=5)
+        with patch.multiple(worker, INTAKE_LANE=False, QUEUE_DIR=str(queue), JOB_BACKEND="codex", CODEX=str(cli)), \
+                patch.object(worker, "stamp", return_value=completed.isoformat()):
+            worker.drain()
+        self.assertEqual(list(queue.iterdir()), [])
+
+        class AtBreakfast(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return (completed + timedelta(hours=5)).astimezone(tz)
+
+        with patch("jarvis_runs.datetime", AtBreakfast):
+            status, brief = self.http("/v1/jarvis/brief/" + completed.date().isoformat())
+        self.assertEqual(status, 200)
+        self.assertEqual([(r["id"], r["title"], r["status"], r["outcome"]) for r in brief["runs"]],
+                         [(child["id"], "Summer roles", "done", finding)])
+        self.assertIn(finding, brief["spoken"])
+        links = re.findall(r"\[Summer roles\]\((/v1/jarvis/runs/[^)]+)\)", brief["markdown"])
+        self.assertEqual(links, ["/v1/jarvis/runs/" + child["id"]])
+        status, report = self.http(links[0])
+        self.assertEqual(status, 200)
+        self.assertEqual(report["markdown"].strip(), markdown)
+        self.assertEqual(report["sources"], [{"label": "Employer listings", "url": source}])
+        attachment = next(file for file in report["files"] if file["path"] == "roles.csv")
+        download = links[0] + "/files/" + attachment["id"]
+        self.assertEqual(self.http(download, auth=False)[0], 401)
+        self.assertEqual(self.http(download), (200, csv.encode()))
+        history = self.http("/v1/jarvis/runs")[1]["runs"]
+        self.assertEqual([r["id"] for r in history if r.get("parent_id") == jid], [child["id"]])
 
     def test_empty_plan_explains_and_invalid_plan_has_no_children(self):
         for plan, state in (({"tasks": [], "note": "Which destinations should I compare?"}, "done"),

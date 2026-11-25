@@ -19,11 +19,12 @@ struct OvernightRun: Decodable, Identifiable {
     var proposal: [ProposedTask]?
     var planningNote: String?
     var confirmationStarted: Bool?
+    var outcome: String?
     var fromJobList = false
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, createdAt, updatedAt, request, markdown, error, sources, files
-        case kind, parentId, runAt, children, proposal, planningNote, confirmationStarted
+        case kind, parentId, runAt, children, proposal, planningNote, confirmationStarted, outcome
     }
 
     struct Source: Decodable, Hashable {
@@ -132,6 +133,22 @@ enum OvernightRunDateOrder: String, CaseIterable {
                 return self == .newestFirst ? left > right : left < right
             }
             .map(\.run)
+    }
+}
+
+struct DailyBrief: Decodable {
+    let date: String
+    let markdown: String
+    let spokenText: String
+    let runs: [OvernightRun]
+
+    enum CodingKeys: String, CodingKey {
+        case date, markdown, runs
+        case spokenText = "spoken"
+    }
+
+    static func dayKey(_ date: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day())
     }
 }
 

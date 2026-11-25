@@ -162,6 +162,10 @@ the service user. The worker uses live hosted web search, an empty workspace,
 and a read-only permission profile. Codex returns a Markdown report and any
 requested CSV, Markdown, JSON or plain text attachments as structured data.
 The worker validates the complete response and atomically publishes its files.
+For reviewed, scheduled Codex work the same archive includes a readable
+`Run steps.md` with the scheduled time, actual start, completed web search
+count and saved file links. A private completion receipt lets a restarted
+worker finish recording a published result without running that research again.
 The structured response limit is 2 MiB and 256 attachments. Job records include
 the actual `provider` and, for Codex, the count of completed `web_searches`.
 The Mac's conversation model choice applies to the Claude backend. Operators
@@ -182,6 +186,29 @@ display `label` and report-relative `path`. The file endpoint streams the
 original bytes, including larger reports. Supported formats are Markdown,
 text, CSV, JSON, PDF, DOCX, JPEG and PNG. Symbolic links and files with multiple
 hard links are excluded. Legacy runs can have an empty file list.
+
+### Daily brief
+
+An authenticated `GET /v1/jarvis/brief/YYYY-MM-DD` returns the Pi-local delivery
+date, a Markdown report in `markdown`, plain narration in `spoken`, and the
+linked run summaries in `runs`. Each run includes an `outcome` taken from its
+saved findings or status. The Mac can open the run using its existing ID to
+view all sources and files.
+
+A delivery day opens at 6 p.m. on the previous local date and closes at 6 p.m.
+on the selected date. Reading an open day shows the work delivered so far.
+Completed research follows its completion time. A scheduled assignment still
+outstanding at the end of its window appears as pending for that day. A later
+completion appears in the brief for its actual completion window. Review plans
+and assignments awaiting a future start are excluded.
+
+Reading a day with work materializes `jarvis/daily/YYYY-MM-DD.md` in the shared
+store. This file is a generated view and can be regenerated from run records.
+It contains report and source links and the same plain narration that playback
+uses. The prose quotes the first short finding of up to two completed reports
+and gives counts for the rest. Legacy runs can contribute their saved text.
+An untouched empty date creates no file. Reading the brief starts no model,
+speech synthesis, scheduled job or external request.
 
 ### Overnight task descriptions
 
@@ -216,12 +243,83 @@ child runs and `run_at` for both. A planner detail includes `children` as run
 summaries in plan order. The planner's completion records dispatch. The child
 statuses show when research actually finishes.
 
-Install `jarvis_intake.py` beside both the collector and the installed worker,
-and `jarvis_schedule.py` beside the collector. Install the updated
-`jarvis-job-file.py` as the existing `bin/jarvis-job` helper. Register the
-new intake service and path with the complete existing Jarvis feature inventory
-using the README registration command before enabling the path. Disable the
-path and stop the planner service to stop accepting work from its spool.
+### Upgrading a Pi that already runs Codex research
+
+Use the approved revision of `iteration/jarvis-daily-brief` for the collector
+and both installed worker files. The collector runs in its source directory.
+The systemd worker runs from a separate `halftone-chat/bin` installation.
+`deploy.sh` only updates the checkout and restarts the collector.
+
+1. Record the current revision, unit states and Jarvis registration in
+   `/etc/charon/jarvis-units.json`. Let active jobs finish. From the Pi service
+   account, update the collector's working directory to the approved revision
+   (use the contents of `collector/` for the public tree). Preserve the installed
+   `.env`, `config.json` and run archives. The commands below assume the existing
+   Codex research setup and a matching service account in the intake units.
+   Run the blocks in the same shell.
+
+   ```sh
+   set -eu
+   cd "$(systemctl show -p WorkingDirectory --value halftone-collector.service)"
+   service_user=$(systemctl show -p User --value halftone-collector.service)
+   test "$(id -un)" = "$service_user"
+   python3 -B -c 'import collector, jarvis_runs, jarvis_intake, jarvis_schedule, jarvis_brief_audio'
+   chat_base=$(python3 -B -c 'import collector; print(collector.load_config()["chat"]["base_dir"])')
+   state_dir=$(python3 -B -c 'import collector; print(collector.load_config()["state_dir"])')
+   systemctl show -p ReadWritePaths -p StateDirectory halftone-collector.service
+   ```
+
+   Check the effective unit grants write access to `$chat_base/jarvis` for
+   `daily/`, run files and queues, and to `$state_dir` for the audio cache.
+   The supplied collector unit covers both when using the stock paths. Custom
+   installations must also match the worker's `CHAT_BASE` and both watched paths.
+
+2. Install the helpers and the new intake units from that same directory.
+   The talk lane invokes the helper as `jarvis-job`.
+
+   ```sh
+   mkdir -p "$chat_base/jarvis/.intake-jobs"
+   install -m 0644 jarvis_intake.py "$chat_base/bin/jarvis_intake.py"
+   install -m 0755 jarvis-job-runner.py "$chat_base/bin/jarvis-job-runner.py"
+   install -m 0755 jarvis-job-file.py "$chat_base/bin/jarvis-job"
+   sudo install -m 0644 halftone-jarvis-intake.service halftone-jarvis-intake.path /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo python3 install-feature-control.py --user "$service_user" --feature jarvis --extend-pairs \
+     --pair halftone-jarvis-say.path:halftone-jarvis-say.service \
+     --pair halftone-jarvis-job.path:halftone-jarvis-job.service \
+     --pair halftone-jarvis-intake.path:halftone-jarvis-intake.service
+   ```
+
+   Retain any additional pairs or services in a custom registration. For
+   narration, configure the collector environment using the voice settings
+   below. The planner and research worker use the service account's Codex CLI
+   sign-in. Keep the ElevenLabs key in the collector environment.
+
+3. Activate after approval. Restarting the collector enables its check for
+   due assignments about every ten seconds while Jarvis is on. Enabling the
+   intake watcher starts a planner whenever a submitted Brain Dump reaches
+   its spool, including after reboot. Process saves review proposals. Done
+   schedules the reviewed tasks. The legacy intake route schedules on submission.
+
+   ```sh
+   sudo systemctl restart halftone-collector.service
+   systemctl is-active halftone-collector.service
+   sudo systemctl enable --now halftone-jarvis-intake.path
+   systemctl is-active halftone-jarvis-intake.path halftone-jarvis-job.path
+   ```
+
+   If Jarvis is paused, leave the watcher activation until Jarvis is resumed.
+   Settings → Features → Jarvis pauses both workers and scheduled dispatch.
+   To retire just the planner watcher, disable it and stop its active worker
+   with `sudo systemctl disable --now halftone-jarvis-intake.path` and
+   `sudo systemctl stop halftone-jarvis-intake.service`.
+
+4. In Charon Live, open an existing Overnight tasks report, then open its
+   delivery date in Daily Brief and read the transcript. These checks use
+   saved runs. Play requests paid synthesis on a cache miss. A private
+   deployment using the read gateway also needs the matching gateway revision
+   to read a brief remotely. Planner submissions and audio use the tailnet
+   action connection on that deployment.
 
 ### Writes
 
@@ -395,3 +493,19 @@ all. Leave the `tts` block out of `config.json` and voice is simply off: both
 routes answer 503, and a sleeping host is a 502 with a reason. Either way the
 client draws a dim word and the text lane is untouched -- a TTS failure is never
 a failed answer.
+
+### Daily Brief narration
+
+Play sends an authenticated `POST /v1/jarvis/brief/YYYY-MM-DD/audio` with the SHA-256
+of the displayed spoken transcript in `transcript_sha256`. The collector reads its
+own brief for that Pi-local date and returns 409 if the transcript has changed.
+The first play uses ElevenLabs speech synthesis; replays use a recording keyed by
+transcript, voice, model and format in `state_dir/jarvis-brief-audio/`. The response
+is a mono 24 kHz WAV. The existing conversation voice continues to use its configured
+local speech service.
+
+Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in the collector environment.
+The optional `ELEVENLABS_TTS_MODEL` defaults to `eleven_flash_v2_5`. Install
+`jarvis_brief_audio.py` next to `collector.py`. Each new recording consumes
+the configured ElevenLabs account's speech allowance when the user clicks Play.
+[ElevenLabs speech API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).

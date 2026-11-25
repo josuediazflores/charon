@@ -71,7 +71,7 @@ final class ConsoleSettings {
     }
 
     func isTabAvailable(_ id: String) -> Bool {
-        if id == ConsoleNav.overnight.id { return isEnabled(.jarvis) }
+        if id == ConsoleNav.overnight.id || id == ConsoleNav.dailyBrief.id { return isEnabled(.jarvis) }
         if let feature = ConsoleFeature(rawValue: id) { return isEnabled(feature) }
         return ConsoleNav.ids.contains(id)
     }

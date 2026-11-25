@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /* The collector, over the tailnet.
  *
@@ -524,6 +525,21 @@ final class LiveClient: MailStore {
         return id
     }
 
+    func dailyBrief(for day: Date) async throws -> DailyBrief {
+        let key = DailyBrief.dayKey(day)
+        let (data, response) = try await session.data(for: request("v1/jarvis/brief/\(key)"))
+        let code = try check(response)
+        if code == 404 || (code == 200 && response.mimeType == "text/html") {
+            throw OvernightSubmissionError(message: "Update the Pi collector to read Daily Brief.")
+        }
+        guard code == 200 else { throw MailError.http(code) }
+        let brief = try MailJSON.decoder.decode(DailyBrief.self, from: data)
+        guard brief.date == key else {
+            throw OvernightSubmissionError(message: "The Pi returned a brief for a different day.")
+        }
+        return brief
+    }
+
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
         let query = cursor.map { [URLQueryItem(name: "before", value: $0)] } ?? []
         let (data, response) = try await session.data(for: request("v1/jarvis/runs", query: query))
@@ -593,6 +609,23 @@ final class LiveClient: MailStore {
 
     func jarvisJobStop(id: String) async -> WriteResult {
         await write("v1/jarvis/job/\(id)/stop")
+    }
+
+    func dailyBriefAudio(day: String, spoken: String) async throws -> Data {
+        guard day.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#, options: .regularExpression) != nil else {
+            throw MailError.badKey
+        }
+        let digest = SHA256.hash(data: Data(spoken.utf8)).map { String(format: "%02x", $0) }.joined()
+        var req = request("v1/jarvis/brief/\(day)/audio", method: "POST", accept: "audio/wav", json: ["transcript_sha256": digest])
+        req.timeoutInterval = 55
+        let (data, response) = try await session.data(for: req)
+        let code = try check(response)
+        guard code == 200, response.mimeType == "audio/wav" else {
+            struct Refusal: Decodable { let error: String }
+            let reason = (try? JSONDecoder().decode(Refusal.self, from: data))?.error
+            throw OvernightSubmissionError(message: reason ?? "Brief audio is unavailable on this collector.")
+        }
+        return data
     }
 
     func jarvisTts(text: String) async -> Data? {

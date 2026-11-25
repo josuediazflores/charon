@@ -456,6 +456,29 @@ final class DemoStore: MailStore {
         }
     }
 
+    func dailyBrief(for day: Date) async throws -> DailyBrief {
+        let calendar = Calendar.current
+        let midnight = calendar.startOfDay(for: day)
+        let end = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: midnight) ?? midnight
+        let start = calendar.date(byAdding: .day, value: -1, to: end) ?? midnight
+        let records = demoIntakeRuns + jarvis.jobList().map(OvernightRun.legacy)
+        let runs = records.compactMap { record -> OvernightRun? in
+            guard !record.isPlanning, ["done", "error", "stopped"].contains(record.status),
+                  let updated = Fmt.date(record.updatedAt), updated >= start, updated < end,
+                  updated <= Date() else { return nil }
+            var run = record
+            let body = run.error ?? run.markdown ?? ""
+            run.outcome = body.split(whereSeparator: \.isNewline).first.map(String.init) ?? run.statusLabel
+            return run
+        }
+        let key = DailyBrief.dayKey(day)
+        let summary = runs.map { "\($0.name). \($0.outcome ?? $0.statusLabel)" }
+        let spoken = summary.isEmpty ? "There are no overnight updates for this brief." : summary.joined(separator: " ")
+        let entries = runs.map { "- [\($0.name)](/v1/jarvis/runs/\($0.id))\n  \($0.outcome ?? $0.statusLabel)" }
+        let markdown = "# Daily Brief\n\n\(key)\n\n" + (entries.isEmpty ? spoken : entries.joined(separator: "\n\n"))
+        return DailyBrief(date: key, markdown: markdown, spokenText: spoken, runs: runs)
+    }
+
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
         OvernightRunPage(runs: demoIntakeRuns + jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
     }
@@ -500,6 +523,9 @@ final class DemoStore: MailStore {
     /// the voice degrades exactly as it does when the real one is asleep -- which
     /// also means the canned shelf, which is in the bundle and needs no network,
     /// is the half of the feature a demo can actually show.
+    func dailyBriefAudio(day: String, spoken: String) async throws -> Data {
+        throw OvernightSubmissionError(message: "Connect to your Pi for narrated briefs.")
+    }
     func jarvisTts(text: String) async -> Data? { nil }
     func jarvisWarmTts() {}
 

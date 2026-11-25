@@ -1,13 +1,17 @@
 """Read-only views over saved jobs and their optional run-owned deliverables."""
 
+from collections import Counter
 from contextlib import contextmanager
+from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 import errno
 import hashlib
 import json
 import os
 import re
 import stat
-from urllib.parse import urlsplit
+import threading
+from urllib.parse import quote, urlsplit
 
 
 JOB_ID = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}-[0-9a-f]{4}")
@@ -217,3 +221,219 @@ def open_file(root, jid, file_id):
             with directory(root, ["runs", jid, "files", *parents]) as fd:
                 return regular_file(fd, name), name, _TYPES[os.path.splitext(name)[1].lower()]
     raise RunError(404, "No such run file")
+
+
+def _local_time(value):
+    try:
+        # Older workers write local ISO strings without an offset. astimezone()
+        # uses the Pi's rules at this instant, including historical DST.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+@lru_cache(maxsize=2)
+def _brief_index(root):
+    return threading.Lock(), {}
+
+
+def _event_dates(doc):
+    terminal = doc.get("status") in ("done", "error", "stopped")
+    ended = _local_time(_text(doc, "updated_at") or _text(doc, "created_at")) if terminal else None
+    due = _local_time(_text(doc, "run_at")) if doc.get("parent_id") else None
+    return ended, due
+
+
+def _brief_dates(root, cache):
+    """Index small timestamp tuples, reading each old job JSON only on first use/change."""
+    live = {}
+    try:
+        with directory(root, ["jobs"]) as fd, os.scandir(fd) as entries:
+            for entry in entries:
+                jid = entry.name.removesuffix(".json")
+                if entry.name != jid + ".json" or not JOB_ID.fullmatch(jid):
+                    continue
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                        continue
+                    sig = (st.st_ino, st.st_ctime_ns, st.st_size)
+                    if jid in cache and cache[jid][0] == sig:
+                        live[jid] = cache[jid]
+                        continue
+                    doc = job_doc(root, jid)
+                    live[jid] = (sig, *_event_dates(doc), doc.get("kind") == "intake")
+                except (FileNotFoundError, NotADirectoryError, RunError):
+                    continue
+    except FileNotFoundError:
+        pass
+    cache.clear()
+    cache.update(live)
+    return live
+
+
+def _report_lead(markdown):
+    # Speak the opening finding, skipping headings, front matter, tables, code
+    # and link destinations. The report itself remains available in full.
+    if not markdown.strip():
+        return "The assignment completed without a written finding."
+    body = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", markdown[:16384], count=1, flags=re.S)
+    body = re.sub(r"(?ms)^\s*(```|~~~).*?^\s*\1[^\n]*(?:\n|$)", "", body)
+    for block in re.split(r"\n\s*\n", body):
+        lines = [line.strip() for line in block.splitlines() if line.strip()
+                 and not line.lstrip().startswith(("#", "!", "|", "<", "---"))]
+        lead = " ".join(lines)
+        lead = re.sub(r"!?(?:\[([^\[\]]{1,256})\])\([^\s]+\)", r"\1", lead)
+        lead = re.sub(r"(?:https?://|www\.)\S+", "", lead, flags=re.I)
+        lead = re.sub(r"^(?:[-*+>]\s+|\d+[.)]\s+)", "", lead)
+        lead = " ".join(lead.translate(str.maketrans("", "", "*_`")).split())
+        if any(ch.isalnum() for ch in lead):
+            sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", lead, maxsplit=1)
+            if len(sentences[0]) <= 220:
+                return sentences[0]
+            return lead[:218].rsplit(" ", 1)[0].rstrip(".,;:") + "…"
+    return "The report is ready to review."
+
+
+def _label(text):
+    return re.sub(r"([\\\[\]*_`<>#|])", r"\\\1", " ".join(text.split()))
+
+
+def _store_brief(root, day, markdown, has_work):
+    data = markdown.encode("utf-8")
+    try:
+        with directory(root, []) as fd:
+            if has_work:
+                try:
+                    os.mkdir("daily", 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+        with directory(root, ["daily"]) as fd:
+            name = day + ".md"
+            try:
+                with regular_file(fd, name) as saved:
+                    if saved.read(len(data) + 1) == data:
+                        return
+            except FileNotFoundError:
+                if not has_work:
+                    return
+            tmp = ".brief-" + os.urandom(8).hex()
+            out = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=fd)
+            try:
+                with os.fdopen(out, "wb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, name, src_dir_fd=fd, dst_dir_fd=fd)
+                os.fsync(fd)
+            finally:
+                try:
+                    os.unlink(tmp, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+    except FileNotFoundError:
+        if has_work:
+            raise
+
+
+def daily_brief(root, queued, date_string, *, now=None, persist=True):
+    """Build the selected Pi-local morning from immutable run IDs and saved outcomes."""
+    try:
+        day = date.fromisoformat(date_string)
+        if day.isoformat() != date_string:
+            raise ValueError
+        start = datetime.combine(day - timedelta(days=1), time(18)).astimezone()
+        end = datetime.combine(day, time(18)).astimezone()
+    except (ValueError, OverflowError, OSError):
+        raise RunError(400, "Choose a valid local date in YYYY-MM-DD format.")
+    as_of = (now or datetime.now().astimezone()).astimezone()
+    lock, cache = _brief_index(os.fspath(root))
+    reports = []
+    notes = []
+    speech = []
+
+    def timing(ended, due):
+        if ended is not None and start <= ended < end and ended <= as_of:
+            return "delivered"
+        if due is not None and start <= due < end and due <= as_of and (ended is None or ended >= end or ended > as_of):
+            return "outstanding"
+        return None
+
+    with lock:
+        candidates = []
+        for jid, (_, ended, due, planner) in _brief_dates(root, cache).items():
+            phase = timing(ended, due)
+            if not planner and phase:
+                candidates.append((ended if phase == "delivered" else due, jid))
+        for _, jid in sorted(candidates, reverse=True):
+            try:
+                doc = job_doc(root, jid)
+            except (FileNotFoundError, NotADirectoryError, RunError):
+                continue
+            ended, due = _event_dates(doc)
+            phase = timing(ended, due)
+            if not phase or doc.get("kind") == "intake":
+                continue
+            run = row(root, doc, queued)
+            if phase == "outstanding" and (as_of >= end or ended is not None):
+                run["status"] = "pending"
+            if _text(doc, "result").rstrip().endswith("[stopped]") and phase == "delivered":
+                run["status"] = "stopped"
+            status = run["status"]
+            title = " ".join(run["title"].split()) or "Untitled assignment"
+            link = f"[{_label(title)}](/v1/jarvis/runs/{jid})"
+            if status == "done":
+                markdown = report_text(root, doc)
+                outcome = _report_lead(markdown)
+                references = sources(markdown)[:3]
+                if len(speech) < 2:
+                    subject = re.sub(r"https?://\S+", "", title)[:120].rstrip(".!?")
+                    speech.append(f"{subject}. {outcome}" + ("" if outcome.endswith((".", "!", "?", "…")) else "."))
+            else:
+                outcome = {"error": "The assignment failed. Open its record for the error.",
+                           "stopped": "The assignment was stopped.",
+                           "running": "Research is in progress.",
+                           "pending": "The report was outstanding at the end of this brief."}.get(
+                               status, "The assignment is waiting to run.")
+                references = []
+            run["outcome"] = outcome
+            reports.append(run)
+            note = f"- {link}. {_label(outcome)}"
+            if references:
+                links = []
+                for ref in references:
+                    target = quote(ref["url"], safe=":/?&=#%+;,@~!$()*")
+                    links.append(f"[{_label(ref['label'])}](<{target}>)")
+                note += " " + " · ".join(links)
+            if status == "done":
+                try:
+                    with directory(root, ["runs", jid, "files"]) as fd, regular_file(fd, "report.md"):
+                        note += f" · [Saved Markdown](../runs/{jid}/files/report.md)"
+                except (OSError, RunError):
+                    pass
+            notes.append(note)
+
+        if not reports:
+            spoken = "Good morning, sir. There are no overnight assignments to report for this brief."
+        else:
+            counts = Counter(r["status"] for r in reports)
+            pending = len(reports) - counts["done"] - counts["error"] - counts["stopped"]
+            for count, message in ((counts["done"] - len(speech), "more completed"),
+                                   (counts["error"], "failed"), (counts["stopped"], "stopped"),
+                                   (pending, "pending")):
+                if count:
+                    noun = "assignment" if count == 1 else "assignments"
+                    if message == "more completed":
+                        speech.append(f"You have {count} more completed {noun} to review.")
+                    elif message == "pending":
+                        verb = "is" if count == 1 else "are"
+                        speech.append(f"{count} {noun} {verb} pending.")
+                    else:
+                        speech.append(f"{count} {noun} {message}.")
+            spoken = "Good morning, sir. " + " ".join(speech)
+        heading = f"# Daily brief for {day.isoformat()}"
+        written = "\n\n".join((heading, "## Overnight assignments", "\n".join(notes) or "No assignments to report.",
+                                "## Spoken brief", spoken)) + "\n"
+        if persist:
+            _store_brief(root, date_string, written, bool(reports))
+    return {"date": date_string, "markdown": written, "spoken": spoken, "runs": reports}

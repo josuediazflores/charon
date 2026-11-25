@@ -250,7 +250,7 @@ private struct RunColumn<Content: View>: View {
     }
 }
 
-private struct RunReader: View {
+struct RunReader: View {
     let store: ConsoleStore
     let summary: OvernightRun
     let legacy: Bool

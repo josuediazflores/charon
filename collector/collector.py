@@ -29,6 +29,7 @@ Run:  python3 collector.py serve
 from feature_control import FEATURES, FeatureControl, admit, feature_access
 import jarvis_runs
 import jarvis_intake
+import jarvis_brief_audio
 from pathlib import Path
 import jarvis_schedule
 
@@ -9624,6 +9625,10 @@ def make_handler(collector, token):
             if found:
                 return self._chat_action(found.group(1), found.group(2))
 
+            match = re.fullmatch(r"/v1/jarvis/brief/([0-9]{4}-[0-9]{2}-[0-9]{2})/audio", path)
+            if match:
+                return self._jarvis_brief_audio(match.group(1))
+
             if path == JARVIS_TTS_ROUTE:
                 return self._jarvis_tts()
 
@@ -9924,6 +9929,24 @@ def make_handler(collector, token):
             if not ok:
                 return self._json(code or 500, {"error": why})
             return self._no_content()
+
+        def _jarvis_brief_audio(self, day):
+            doc, why = self._read_body(256)
+            digest = doc.get("transcript_sha256") if isinstance(doc, dict) else None
+            if why or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+                return self._json(400, {"error": "A valid transcript_sha256 is required."})
+            root = collector.jarvis_dir()
+            if not root:
+                return self._json(503, {"error": "chat.base_dir is unset"})
+            try:
+                brief = jarvis_runs.daily_brief(root, collector.jarvis_job_is_queued, day)
+                audio = jarvis_brief_audio.recording(collector.state_dir, brief["spoken"], digest)
+            except jarvis_runs.RunError as exc:
+                return self._json(exc.code, {"error": str(exc)})
+            except OSError:
+                return self._json(500, {"error": "Could not read the brief or save its recording."})
+            self._headers(200, "audio/wav", len(audio), {"Cache-Control": "no-store"})
+            self.wfile.write(audio)
 
         def _jarvis_tts(self):
             """POST /v1/jarvis/tts -- one sentence in, one WAV back.
@@ -10462,6 +10485,20 @@ def make_handler(collector, token):
 
             if path == JARVIS_JOBS_ROUTE:
                 return self._json(200, {"jobs": collector.jarvis_jobs()})
+
+            if path.startswith("/v1/jarvis/brief/"):
+                root = collector.jarvis_dir()
+                if not root:
+                    return self._json(503, {"error": "chat.base_dir is unset"})
+                try:
+                    brief = jarvis_runs.daily_brief(root, collector.jarvis_job_is_queued,
+                                                    path.removeprefix("/v1/jarvis/brief/"),
+                                                    persist=self.headers.get("X-Charon-Read-Only") != "1")
+                except jarvis_runs.RunError as exc:
+                    return self._json(exc.code, {"error": str(exc)})
+                except OSError:
+                    return self._json(500, {"error": "Cannot read or save the daily brief."})
+                return self._json(200, brief)
 
             if path == JARVIS_RUNS_ROUTE or path.startswith(JARVIS_RUNS_ROUTE + "/"):
                 return self._jarvis_runs(path, query)

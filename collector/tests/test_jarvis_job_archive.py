@@ -111,6 +111,34 @@ class JobArchiveTests(unittest.TestCase):
         self.assertEqual((self.files / "roles.csv").read_text(), "role,link\nSWE,https://example.org/job\n")
         self.assertFalse(self.spool.exists())
 
+    def test_scheduled_codex_recovers_published_report_after_interrupted_settlement(self):
+        job = json.loads(self.record.read_text())
+        job.update(parent_id="2026-11-23-1200-abcd", intake_key="batch-0",
+                   run_at="2026-11-24T09:00:00Z")
+        self.record.write_text(json.dumps(job))
+        result = runner.CodexState()
+        result.ok, result.result_text, result.web_searches = True, "Found five open roles.", 4
+        result.files = [{"name": "Run steps.md", "content": "Requested deliverable"}]
+        result.usage = {"output_tokens": 99}
+        with patch.object(runner, "JOB_BACKEND", "codex"), \
+             patch.object(runner, "run_codex", return_value=(result, False)) as model:
+            with patch.object(runner, "settle", side_effect=InterruptedError("exit after publish")):
+                with self.assertRaises(InterruptedError):
+                    runner.run(self.jid)
+            self.assertEqual(json.loads(self.record.read_text())["status"], "running")
+            (self.root/".jobstop"/self.jid).touch()
+            runner.run(self.jid)
+            model.assert_called_once()
+        doc = json.loads(self.record.read_text())
+        self.assertEqual((doc["status"], doc["result"], doc["usage"], doc["web_searches"]),
+                         ("done", result.result_text, result.usage, 4))
+        self.assertFalse(self.spool.exists())
+        self.assertFalse((self.root/".jobstop"/self.jid).exists())
+        steps = (self.files/"Run steps 2.md").read_text()
+        self.assertIn("4 completed web search calls", steps)
+        self.assertIn("Run%20steps.md", steps)
+        self.assertEqual((self.files/"Run steps.md").read_text(), "Requested deliverable")
+
     def test_codex_requires_a_terminal_event_and_zero_exit(self):
         for events, exit_code in (([], 0), ([{"type": "turn.completed"}], 1)):
             with self.subTest(events=events), self.fake_codex(f"""

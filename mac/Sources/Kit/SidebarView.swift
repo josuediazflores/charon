@@ -19,8 +19,9 @@ enum ConsoleNav {
         SidebarItemSpec(id: "settings", symbol: "gearshape", label: "Settings"),
     ]
 
+    static let dailyBrief = SidebarItemSpec(id: "jarvis-brief", symbol: "sunrise", label: "Daily Brief")
     static let overnight = SidebarItemSpec(id: "jarvis-overnight", symbol: "moon", label: "Overnight tasks")
-    static let destinations = items.flatMap { $0.id == "jarvis" ? [$0, overnight] : [$0] }
+    static let destinations = items.flatMap { $0.id == "jarvis" ? [$0, dailyBrief, overnight] : [$0] }
     static let ids: Set<String> = Set(destinations.map(\.id))
 
     static func label(_ id: String) -> String {
@@ -60,7 +61,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(items) { item in
                         if item.id == "jarvis" {
-                            let sectionActive = active == item.id || active == ConsoleNav.overnight.id
+                            let sectionActive = active == item.id || active == ConsoleNav.dailyBrief.id || active == ConsoleNav.overnight.id
                             SidebarRow(item: item, active: sectionActive && !jarvisExpanded,
                                        expanded: jarvisExpanded) {
                                 jarvisExpanded.toggle()
@@ -68,6 +69,8 @@ struct SidebarView: View {
                             if jarvisExpanded {
                                 SidebarRow(item: .init(id: item.id, symbol: "text.bubble", label: "Conversation"),
                                            active: active == item.id, nested: true) { onSelect(item.id) }
+                                SidebarRow(item: ConsoleNav.dailyBrief, active: active == ConsoleNav.dailyBrief.id,
+                                           nested: true) { onSelect(ConsoleNav.dailyBrief.id) }
                                 SidebarRow(item: ConsoleNav.overnight, active: active == ConsoleNav.overnight.id,
                                            nested: true) { onSelect(ConsoleNav.overnight.id) }
                             }

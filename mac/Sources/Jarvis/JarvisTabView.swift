@@ -95,6 +95,8 @@ struct JarvisTabView: View {
     @State private var focusToken = 0
 
     @State private var voice: VoiceMode = .off
+    @State private var dictation = JarvisDictation()
+    @State private var interruptSpokenTurn = false
     @State private var speaker = Speaker()
     /// One extractor per in-flight turn. A cursor, not a render input, so it
     /// lives beside the view rather than in it.
@@ -126,7 +128,7 @@ struct JarvisTabView: View {
         .task(id: pollKey) { await poll() }
         .onChange(of: doc) { _, _ in pumpVoice() }
         .onChange(of: voice) { _, _ in pumpVoice() }
-        .onDisappear { speaker.cancel() }
+        .onDisappear { dictation.leave(); speaker.cancel() }
     }
 
     // The chat owns its viewport so the composer stays reachable on long days.
@@ -291,6 +293,7 @@ struct JarvisTabView: View {
         Button {
             historyOpen = false
             guard key != day else { return }
+            dictation.leave()
             speaker.cancel()
             day = key
             doc = nil
@@ -388,7 +391,7 @@ struct JarvisTabView: View {
                         .font(.system(size: 16))
                         .allowsHitTesting(false)
                 }
-                PromptBox(text: $draft, maxLength: jarvisTextMax, disabled: unreachable,
+                PromptBox(text: $draft, maxLength: max(jarvisTextMax, draft.count), disabled: unreachable,
                           focusToken: focusToken, inputFont: .systemFont(ofSize: 16),
                           fieldLabel: "Message Jarvis",
                           onSubmit: submit)
@@ -425,6 +428,15 @@ struct JarvisTabView: View {
                 if live {
                     Button("Stop") { Task { await stop() } }.foregroundStyle(FocusInk.sand)
                 }
+                JarvisDictationButton(dictation: dictation) {
+                    speaker.cancel()
+                    interruptSpokenTurn = live || sending != nil
+                    cursor = nil
+                    dictation.start { phrase in
+                        draft = JarvisDictation.appending(phrase, to: draft)
+                        focusToken += 1
+                    }
+                }.disabled(unreachable && !dictation.active)
                 Button(action: toggleVoice) {
                     Image(systemName: voice == .off ? "speaker" : "speaker.wave.2.fill")
                         .frame(width: 22, height: 28)
@@ -443,6 +455,7 @@ struct JarvisTabView: View {
                 .disabled(!canSubmit)
             }
             .font(.system(size: 12))
+            JarvisDictationFeedback(dictation: dictation)
             if filing || (voice != .off && speaker.unavailable) {
                 Text(filing ? "Filing job…" : "Spoken replies unavailable").font(.caption)
             }
@@ -461,7 +474,8 @@ struct JarvisTabView: View {
     }
 
     private var canSubmit: Bool {
-        today && !unreachable && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        today && !unreachable && !dictation.active && draft.count <= jarvisTextMax
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (asJob ? !filing : (!live && sending == nil))
     }
 
@@ -491,19 +505,11 @@ struct JarvisTabView: View {
     /// failure, because the failure is the previous turn's and this one is
     /// happening now; and work outranks idle, because a day with three jobs
     /// running is not a day where nothing is happening.
-    /// Whether the microphone is open.
-    ///
-    /// **Always false in this port.** Dictation is deferred (SPEC-CMO decision
-    /// 1) and nothing sets it, but the state keeps its name and its place at the
-    /// top of the priority order below, because the order is the contract and
-    /// the day the mic lands this is where it belongs.
-    private var listening: Bool { false }
-
     private var presence: Presence {
         // **Listening outranks everything.** It is the only state here the reader
         // caused half a second ago and is waiting on, and the orb is the largest
         // thing on the page.
-        if listening { return Presence(word: "listening", activity: 1) }
+        if dictation.phase == .recording { return Presence(word: "listening", activity: 1) }
         if sending != nil { return Presence(word: "filing", activity: 0.6, ink: HT.c12) }
         if doc?.queued == true { return Presence(word: "queued", activity: 0.9, ink: HT.c12) }
         if doc?.status == .running { return Presence(word: "thinking", activity: 0.9, ink: HT.c12) }
@@ -550,6 +556,11 @@ struct JarvisTabView: View {
     /// own field -- job cards and notices never pass through it -- and the
     /// finalize below reads nothing but an assistant say turn.
     private func pumpVoice() {
+        if interruptSpokenTurn {
+            if !live && sending == nil { interruptSpokenTurn = false }
+            return
+        }
+        if dictation.active { return }
         if voice == .off || !today {
             cursor = nil
             return
@@ -686,6 +697,7 @@ struct JarvisTabView: View {
     }
 
     private func send(_ text: String) async -> Bool {
+        interruptSpokenTurn = false
         failed = nil
         // Barge-in: a filed question ends the previous answer's voice mid-word,
         // and -- while voice is on -- warms the Mac for the reply now coming.

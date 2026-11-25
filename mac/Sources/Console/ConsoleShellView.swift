@@ -317,6 +317,9 @@ struct ConsoleShellView: View {
             console { SettingsView(model: model) }
         } else if tab == "overview" {
             console { overview }
+        } else if tab == ConsoleNav.dailyBrief.id {
+            DailyBriefView(store: model.store, today: model.now)
+                .id(ObjectIdentifier(model.store))
         } else if tab == ConsoleNav.overnight.id {
             OvernightTasksView(model: model)
         } else if tab == "jarvis" {

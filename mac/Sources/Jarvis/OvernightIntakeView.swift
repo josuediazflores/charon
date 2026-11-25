@@ -7,6 +7,7 @@ struct OvernightIntakeView: View {
     @SceneStorage private var draft: String
     @SceneStorage private var requestID: String
     @State private var sending = false
+    @State private var dictation = JarvisDictation()
     @State private var error: String?
     @FocusState private var editing: Bool
 
@@ -26,10 +27,17 @@ struct OvernightIntakeView: View {
             HStack {
                 Text("Brain Dump").font(FocusInk.heading(38))
                 Spacer()
+                JarvisDictationButton(dictation: dictation) {
+                    dictation.start { phrase in
+                        draft = JarvisDictation.appending(phrase, to: draft)
+                        requestID = ""
+                        error = nil
+                    }
+                }.disabled(sending)
                 Button("Process") { Task { await process() } }
                     .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(sending || (store as? DemoStore)?.hasPreviewPlanner == false || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    .disabled(dictation.active || sending || (store as? DemoStore)?.hasPreviewPlanner == false || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               draft.unicodeScalars.count > OvernightIntake.textLimit)
             }
             Divider()
@@ -41,6 +49,7 @@ struct OvernightIntakeView: View {
             if sending {
                 SeparatingTasks()
             } else {
+                JarvisDictationFeedback(dictation: dictation)
                 TextEditor(text: Binding(get: { draft }, set: { draft = $0; requestID = ""; error = nil }))
                     .font(.system(size: 17)).lineSpacing(6).scrollContentBackground(.hidden)
                     .accessibilityLabel("Brain Dump Markdown").focused($editing)
@@ -56,10 +65,11 @@ struct OvernightIntakeView: View {
             if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
         }
         .padding(32).frame(maxWidth: 760).frame(maxWidth: .infinity)
+        .onDisappear { dictation.leave() }
     }
 
     private func process() async {
-        guard !sending else { return }
+        guard !sending, !dictation.active else { return }
         sending = true
         defer { sending = false }
         error = nil

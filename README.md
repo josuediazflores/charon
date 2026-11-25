@@ -104,8 +104,10 @@ running as jobs in a second lane that never blocks the conversation. The orb is
 a 1-bit dither and its state is the session's state.
 
 In **Jarvis → Overnight tasks**, choose **Set overnight tasks** to open a blank
-Markdown page titled **Brain Dump**. Choose **Process** to have Codex propose
-tasks immediately. Expand each card to review or edit its title, goal and
+Markdown page titled **Brain Dump**. Type your notes or choose **Dictate**
+to draft with the microphone on a Mac that supports on-device recognition for
+your language. You can edit the text before choosing **Process** to have Codex
+propose tasks immediately. Expand each card to review or edit its title, goal and
 context, or delete it. Choose a start time and click **Done** to queue the
 remaining tasks. Once the Pi confirms, you can close your Mac.
 
@@ -118,6 +120,14 @@ Each assignment has its own status, report, sources, and files. Completed runs
 stay in your history. Choose **Show earlier tasks** to load another page.
 Word documents and PDFs open in Quick Look. **Save a copy** keeps a file on
 your Mac.
+
+Open **Jarvis → Daily Brief** for the morning transcript and links to each
+assignment. Use the date arrows for earlier briefs. The brief gathers completed
+work since 6 p.m. on the previous day, includes outstanding assignments due in
+the same window, and closes at 6 p.m. on the selected Pi-local date. **Play
+brief** generates ElevenLabs narration on demand when the Pi has its voice
+credentials. Replay uses the cached recording. The written brief and its
+source links are available without an audio account.
 
 With an older collector, Charon reads its recent job list and the result text
 it already provides. Full reports, older pages and archived files use the

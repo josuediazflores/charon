@@ -2,8 +2,20 @@ import Foundation
 
 @main
 struct TestOvernightRuns {
-    static func main() throws {
+    @MainActor static func main() throws {
         let decoder = MailJSON.decoder
+        precondition(JarvisDictation.appending("  Find internships. ", to: "") == "Find internships.")
+        precondition(JarvisDictation.appending("More detail.", to: "Typed notes.") == "Typed notes. More detail.")
+        precondition(JarvisDictation.appending("Chicago", to: "# Notes\n- ") == "# Notes\n- Chicago")
+        precondition(JarvisDictation.appending("  ", to: "Keep this\n") == "Keep this\n")
+        // No yield between start and cancellation, so authorization never begins.
+        let dictation = JarvisDictation()
+        var insertions = 0
+        dictation.start { _ in insertions += 1 }
+        precondition(dictation.phase == .authorizing)
+        dictation.discard()
+        dictation.leave()
+        precondition(!dictation.active && dictation.partial.isEmpty && insertions == 0)
         let oldJob = try decoder.decode(JarvisJob.self, from: Data(#"""
         {"id":"2026-11-22-0615-1111","status":"done","result":"Read https://example.org/report."}
         """#.utf8))
@@ -28,6 +40,17 @@ struct TestOvernightRuns {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
         let iso = ISO8601DateFormatter()
+        let shortlyAfterUTCMidnight = iso.date(from: "2026-11-25T00:10:00Z")!
+        precondition(DailyBrief.dayKey(shortlyAfterUTCMidnight, timeZone: calendar.timeZone) == "2026-11-24")
+        let brief = try decoder.decode(DailyBrief.self, from: Data(#"""
+        {"date":"2026-11-24","markdown":"# Daily Brief","spoken":"I found two roles.","runs":[
+         {"id":"research-17","title":"Find summer internships","status":"done","created_at":"","updated_at":"",
+          "outcome":"Two roles have application links."}]}
+        """#.utf8))
+        precondition(brief.spokenText == "I found two roles." && brief.markdown == "# Daily Brief")
+        precondition(brief.runs.first?.id == "research-17" && brief.runs.first?.outcome == "Two roles have application links.")
+        let missingSpeech = Data(#"{"date":"2026-11-24","markdown":"Daily Brief","runs":[]}"#.utf8)
+        precondition((try? decoder.decode(DailyBrief.self, from: missingSpeech)) == nil)
         let beforeOne = iso.date(from: "2026-11-24T08:59:00Z")!
         let afterOne = iso.date(from: "2026-11-24T09:01:00Z")!
         precondition(iso.string(from: OvernightIntake.nextStart(after: beforeOne, calendar: calendar)) == "2026-11-24T09:00:00Z")

@@ -71,6 +71,7 @@ protocol ConsoleStore: AnyObject {
     func jarvisDays() async -> [JarvisDaySummary]?
     func jarvisDay(_ day: String) async throws -> JarvisDay?
     func jarvisJobs() async -> [JarvisJob]?
+    func dailyBrief(for day: Date) async throws -> DailyBrief
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage
     func overnightRun(id: String) async throws -> OvernightRun?
     func processBrainDump(requestID: UUID, text: String) async throws -> String
@@ -88,6 +89,7 @@ protocol ConsoleStore: AnyObject {
     func jarvisJob(text: String, title: String) async -> WriteResult
     func jarvisJobStop(id: String) async -> WriteResult
     /// A WAV, or nil when the far end would not synthesise one.
+    func dailyBriefAudio(day: String, spoken: String) async throws -> Data
     func jarvisTts(text: String) async -> Data?
     func jarvisWarmTts()
 }
