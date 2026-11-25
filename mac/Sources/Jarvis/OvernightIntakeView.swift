@@ -102,6 +102,84 @@ private struct SeparatingTasks: View {
     }
 }
 
+private struct OvernightStartPicker: View {
+    @Binding var selection: Date
+    @State private var editing = false
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
+
+    private var dateLabel: String {
+        var format = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
+        if !calendar.isDate(selection, equalTo: .now, toGranularity: .year) {
+            format = format.year()
+        }
+        format.timeZone = timeZone
+        return selection.formatted(format)
+    }
+
+    private var timeLabel: String {
+        var format = Date.FormatStyle.dateTime.hour().minute()
+        format.timeZone = timeZone
+        return selection.formatted(format)
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                caption
+                Spacer(minLength: 8)
+                scheduleButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                caption
+                scheduleButton
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private var caption: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Start tasks").font(.headline)
+            Text(timeZone.localizedName(for: .generic, locale: .current) ?? timeZone.identifier)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var scheduleButton: some View {
+        Button { editing = true } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "calendar").foregroundStyle(FocusInk.sand)
+                Text(dateLabel)
+                Rectangle().fill(FocusInk.cardLine).frame(width: 1, height: 14)
+                Text(timeLabel).monospacedDigit()
+                Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+            }
+            .font(.system(size: 13, weight: .medium)).lineLimit(1)
+            .padding(.horizontal, 12).frame(height: 34)
+            .focusCard().contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Change start date and time")
+        .accessibilityValue(selection.formatted(date: .complete, time: .shortened))
+        .help("Change start date and time")
+        .popover(isPresented: $editing, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                DatePicker("Start date", selection: $selection, displayedComponents: .date)
+                    .datePickerStyle(.graphical).labelsHidden()
+                Divider()
+                HStack {
+                    DatePicker("Start time", selection: $selection, displayedComponents: .hourAndMinute)
+                    Spacer(minLength: 12)
+                    Button("Close") { editing = false }.keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(14).fixedSize().tint(FocusInk.sand)
+        }
+    }
+}
+
 private struct ReviewCard: Codable, Identifiable {
     var id = UUID()
     var task: ProposedTask
@@ -154,10 +232,10 @@ struct BrainDumpReview: View {
             if loaded {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        DatePicker("Start tasks", selection: Binding(get: { Date(timeIntervalSinceReferenceDate: start) },
-                            set: { start = $0.timeIntervalSinceReferenceDate }), displayedComponents: [.date, .hourAndMinute])
-                        Text(TimeZone.autoupdatingCurrent.localizedName(for: .generic, locale: .current)
-                             ?? TimeZone.autoupdatingCurrent.identifier).font(.caption).foregroundStyle(.secondary)
+                        OvernightStartPicker(selection: Binding(
+                            get: { Date(timeIntervalSinceReferenceDate: start) },
+                            set: { start = $0.timeIntervalSinceReferenceDate }
+                        ))
                         if locked { Text("Your schedule was saved. Click Done to finish queuing these tasks.") }
                         if !note.isEmpty { Text(note).textSelection(.enabled) }
                         ForEach($cards) { $card in
