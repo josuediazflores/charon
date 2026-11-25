@@ -71,8 +71,19 @@ struct TestOvernightRuns {
                      ["scheduled", "running", "review", "error", "dated", "undated"])
         precondition(OvernightRunDateOrder.oldestFirst.sorted(list).map(\.id) ==
                      ["dated", "error", "running", "review", "scheduled", "undated"])
-        precondition(list.filter(OvernightRunFilter.inFlight.matches).map(\.id) == ["running", "scheduled"])
-        precondition(list.filter(OvernightRunFilter.history.matches).map(\.id) == ["error", "dated", "undated"])
+        let evening = iso.date(from: "2026-11-25T06:45:00Z")!
+        func group(_ run: OvernightRun) -> OvernightSection? {
+            OvernightSection.section(for: run, now: evening, calendar: calendar)
+        }
+        precondition(list.filter { group($0) == .queued }.map(\.id) == ["scheduled"])
+        precondition(list.filter { group($0) == .overnight }.map(\.id) == ["running"])
+        precondition(group(plan) == nil)
+        var farFuture = list[1]
+        farFuture.runAt = "2026-11-26T09:00:00Z"
+        precondition(group(farFuture) == nil)
+        var finished = list[0]
+        finished.status = "error"
+        precondition(group(finished) == .overnight)
         let page = try decoder.decode(OvernightRunPage.self, from: Data(#"""
         {"runs":[{"id":"run-a","title":"Task","status":"done","created_at":"2026-11-22","updated_at":"2026-11-23"}],"next_cursor":"run-a"}
         """#.utf8))

@@ -4,31 +4,27 @@ import SwiftUI
 
 struct OvernightTasksView: View {
     let model: MailModel
+    let openBrief: () -> Void
 
     var body: some View {
-        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL)
+        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL,
+                         now: model.now, openBrief: openBrief)
             .id(ObjectIdentifier(model.store))
     }
-}
-
-private struct PageRequest: Equatable {
-    var before: String?
-    let revision = UUID()
 }
 
 private struct OvernightRunList: View {
     let store: ConsoleStore
     let draftScope: String
+    let now: Date
+    let openBrief: () -> Void
     @State private var runs: [OvernightRun] = []
     @State private var route: [OvernightRun] = []
     @State private var composing = false
-    @State private var cursor: String?
-    @State private var query = PageRequest()
+    @State private var query = UUID()
     @State private var loading = true
     @State private var legacy = false
     @State private var error: String?
-    @State private var filter = OvernightRunFilter.all
-    @AppStorage("overnightTaskDateOrder") private var dateOrder = OvernightRunDateOrder.newestFirst
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,15 +36,15 @@ private struct OvernightRunList: View {
             } else if let selected = route.last, selected.kind == "brain_dump", selected.status != "done" {
                 BrainDumpReview(store: store, scope: draftScope, plan: selected, back: {
                     route.removeLast()
-                    query = PageRequest()
-                }, confirmed: { plan in route = [plan] })
+                    query = UUID()
+                }, confirmed: { _ in route = []; query = UUID() })
                 .id(selected.id)
             } else if let selected = route.last {
                 RunReader(store: store, summary: selected, legacy: legacy,
                           backTitle: route.dropLast().last?.name ?? "Overnight tasks",
-                          openChild: { route.append($0) }) {
+                          openBrief: openBrief, openChild: { route.append($0) }) {
                     route.removeLast()
-                    if route.isEmpty { query = PageRequest() }
+                    if route.isEmpty { query = UUID() }
                 }
                     .id(selected.id)
             } else {
@@ -57,6 +53,15 @@ private struct OvernightRunList: View {
                         HStack {
                             Text("Overnight tasks").font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                             Spacer()
+                            Button("Daily Brief", action: openBrief)
+                            let drafts = runs.filter { $0.kind == "brain_dump" && ($0.active || $0.status == "review") }
+                            if !drafts.isEmpty {
+                                Menu("Resume review") {
+                                    ForEach(drafts) { draft in
+                                        Button(dateLabel(draft.createdAt)) { route = [draft] }
+                                    }
+                                }.fixedSize()
+                            }
                             Button { composing = true } label: {
                                 ViewThatFits {
                                     Label("Set overnight tasks", systemImage: "plus")
@@ -64,7 +69,7 @@ private struct OvernightRunList: View {
                                 }
                             }
                             .accessibilityLabel("Set overnight tasks")
-                            Button { query = PageRequest() } label: { Image(systemName: "arrow.clockwise") }
+                            Button { query = UUID() } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel("Refresh overnight tasks").disabled(loading)
                         }
                         if legacy {
@@ -73,19 +78,13 @@ private struct OvernightRunList: View {
                         }
                         if let error {
                             Text(error).foregroundStyle(.secondary)
-                            Button("Try again") { query = PageRequest(before: query.before) }
+                            Button("Try again") { query = UUID() }
                         }
-                        if runs.isEmpty && !loading && error == nil {
-                            Text("No overnight tasks yet.").foregroundStyle(.secondary)
-                        }
-                        if !runs.isEmpty {
-                            listControls
-                            taskRows
+                        if !runs.isEmpty || (!loading && error == nil) {
+                            taskSection(.overnight, title: "Last night", empty: "No overnight runs yet.")
+                            taskSection(.queued, title: "Queued for tonight", empty: "No tasks queued for tonight.")
                         }
                         if loading { ProgressView().controlSize(.small).accessibilityLabel("Loading overnight tasks") }
-                        if let cursor, !loading, error == nil {
-                            Button("Show earlier tasks") { query = PageRequest(before: cursor) }
-                        }
                     }
                     .frame(maxWidth: 690, alignment: .leading).padding(32)
                     .frame(maxWidth: .infinity)
@@ -96,13 +95,18 @@ private struct OvernightRunList: View {
             loading = true
             error = nil
             do {
-                let page = try await store.overnightRuns(before: query.before)
-                try Task.checkCancellation()
-                if query.before == nil { runs = [] }
-                var seen = Set(runs.map(\.id))
-                runs.append(contentsOf: page.runs.filter { seen.insert($0.id).inserted })
-                cursor = page.nextCursor
-                legacy = page.legacy
+                var cursor: String?
+                var cursors = Set<String>()
+                var seen = Set<String>()
+                var fetched: [OvernightRun] = []
+                repeat {
+                    let page = try await store.overnightRuns(before: cursor)
+                    try Task.checkCancellation()
+                    fetched += page.runs.filter { seen.insert($0.id).inserted }
+                    legacy = page.legacy
+                    cursor = page.nextCursor
+                } while cursor.map({ cursors.insert($0).inserted }) == true
+                runs = fetched
             } catch {
                 if Task.isCancelled { return }
                 self.error = error.localizedDescription
@@ -111,69 +115,13 @@ private struct OvernightRunList: View {
         }
     }
 
-    private var listControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                filterButtons
-                Spacer(minLength: 12)
-                dateMenu
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                filterButtons
-                dateMenu
-            }
-        }
-    }
-
-    private var filterButtons: some View {
-        HStack(spacing: 4) {
-            ForEach(OvernightRunFilter.allCases, id: \.self) { option in
-                let selected = option == filter
-                let count = runs.count(where: option.matches)
-                Button { filter = option } label: {
-                    HStack(spacing: 5) {
-                        Text(option.rawValue).fontWeight(selected ? .semibold : .regular)
-                        Text(count.formatted()).monospacedDigit().foregroundStyle(FocusInk.secondary)
-                    }
-                    .font(.callout)
-                    .fixedSize()
-                    .foregroundStyle(selected ? FocusInk.sand : FocusInk.text)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(selected ? HT.surface3 : HT.void, in: RoundedRectangle(cornerRadius: 6))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(option.rawValue), \(count) tasks")
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .fixedSize()
-    }
-
-    private var dateMenu: some View {
-        Menu {
-            Picker("Sort by date", selection: $dateOrder) {
-                ForEach(OvernightRunDateOrder.allCases, id: \.self) { order in
-                    Text(order.rawValue).tag(order)
-                }
-            }
-        } label: {
-            Label(dateOrder.rawValue, systemImage: "arrow.up.arrow.down")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .accessibilityLabel("Sort by date")
-        .accessibilityValue(dateOrder.rawValue)
-        .help("Sort loaded tasks by the date shown in each row")
-    }
-
     @ViewBuilder
-    private var taskRows: some View {
-        let visible = dateOrder.sorted(runs.filter(filter.matches))
+    private func taskSection(_ section: OvernightSection, title: String, empty: String) -> some View {
+        let order: OvernightRunDateOrder = section == .queued ? .oldestFirst : .newestFirst
+        let visible = order.sorted(runs.filter { OvernightSection.section(for: $0, now: now) == section })
+        Text(title).font(.headline).foregroundStyle(FocusInk.text).padding(.top, 8)
         if visible.isEmpty {
-            Text(filter == .inFlight ? "No in-flight tasks in this list." : "No task history in this list.")
-                .foregroundStyle(.secondary)
+            Text(empty).font(.callout).foregroundStyle(.secondary)
         } else {
             LazyVStack(spacing: 0) {
                 ForEach(visible) { run in
@@ -255,6 +203,7 @@ struct RunReader: View {
     let summary: OvernightRun
     let legacy: Bool
     let backTitle: String
+    var openBrief: (() -> Void)? = nil
     let openChild: (OvernightRun) -> Void
     let back: () -> Void
     @State private var report: OvernightRun?
@@ -271,8 +220,13 @@ struct RunReader: View {
                 .id(current)
         } else {
             RunColumn { scroll in
-                Button(action: back) { Label(backTitle, systemImage: "arrow.left") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                HStack {
+                    Button(action: back) { Label(backTitle, systemImage: "arrow.left") }
+                    Spacer()
+                    if let openBrief {
+                        Button(action: openBrief) { Label("Daily Brief", systemImage: "sunrise") }
+                    }
+                }.buttonStyle(.plain).foregroundStyle(.secondary)
                 Text(summary.name).font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
                 if let report {
                     Text(statusLine(report))

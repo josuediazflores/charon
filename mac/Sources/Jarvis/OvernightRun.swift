@@ -107,17 +107,28 @@ struct OvernightRun: Decodable, Identifiable {
     }
 }
 
-enum OvernightRunFilter: String, CaseIterable {
-    case all = "All"
-    case inFlight = "In flight"
-    case history = "History"
+enum OvernightSection {
+    case overnight, queued
 
-    func matches(_ run: OvernightRun) -> Bool {
-        switch self {
-        case .all: return true
-        case .inFlight: return run.active || run.status == "scheduled"
-        case .history: return ["done", "error", "stopped"].contains(run.status)
+    static func section(for run: OvernightRun, now: Date, calendar: Calendar = .current) -> Self? {
+        guard !run.isPlanning, let updated = run.listDate,
+              let evening = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: now),
+              let previous = calendar.date(byAdding: .day, value: -1, to: evening),
+              let following = calendar.date(byAdding: .day, value: 1, to: evening) else { return nil }
+
+        if ["scheduled", "queued", "running"].contains(run.status) {
+            let due = run.runAt.flatMap { Fmt.date($0) } ?? updated
+            if due <= now {
+                guard due >= previous else { return nil }
+                return run.status == "running" ? .overnight : .queued
+            }
+            let nextStart = OvernightIntake.nextStart(after: now, calendar: calendar)
+            let end = calendar.isDate(now, inSameDayAs: nextStart) ? evening : following
+            return due < end ? .queued : nil
         }
+        guard ["done", "error", "stopped"].contains(run.status),
+              updated >= previous, updated < evening, updated <= now else { return nil }
+        return .overnight
     }
 }
 

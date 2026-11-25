@@ -56,6 +56,7 @@ struct ConsoleShellView: View {
     @State private var dismissals = CmoDismissals()
     @State private var watchSeen = SeenMarks("cmo-watch-seen")
     @State private var docsSeen = SeenMarks("cmo-docs-seen")
+    @State private var overnightRoot = UUID()
     @State private var tab: String = ConsoleSettings.shared.landing
     /// A reader can reveal the sidebar for its own message.
     @State private var expandedMailMessage: String?
@@ -214,7 +215,10 @@ struct ConsoleShellView: View {
             ),
             items: settings.availableTabs,
             active: tab,
-            onSelect: { tab = $0 },
+            onSelect: { destination in
+                if tab == destination && destination == ConsoleNav.overnight.id { overnightRoot = UUID() }
+                tab = destination
+            },
             footer: AnyView(railFooter))
     }
 
@@ -321,7 +325,8 @@ struct ConsoleShellView: View {
             DailyBriefView(store: model.store, today: model.now)
                 .id(ObjectIdentifier(model.store))
         } else if tab == ConsoleNav.overnight.id {
-            OvernightTasksView(model: model)
+            OvernightTasksView(model: model) { tab = ConsoleNav.dailyBrief.id }
+                .id(overnightRoot)
         } else if tab == "jarvis" {
             JarvisTabView(model: model)
         } else if model.payload == nil {
