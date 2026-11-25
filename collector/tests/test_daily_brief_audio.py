@@ -51,6 +51,18 @@ class BriefAudioTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_pending_task_blocks_even_cached_playback(self):
+        root = Path(self.store.jarvis_dir())
+        jobs = root / "jobs"
+        jobs.mkdir(parents=True, exist_ok=True)
+        jid = "2020-01-01-0100-abcd"
+        doc = {"id": jid, "status": "running", "parent_id": "2019-12-31-1900-abcd",
+               "run_at": "2020-01-01T01:00:00", "title": "Compare trains"}
+        (jobs / (jid + ".json")).write_text(json.dumps(doc))
+        with patch.object(audio, "recording") as recording:
+            self.assertEqual(self.post(self.body)[0], 409)
+            recording.assert_not_called()
+
     def test_authorization_stale_and_missing_config(self):
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "", "ELEVENLABS_VOICE_ID": ""}), \
                 patch.object(audio, "synthesize") as synthesize:

@@ -6,6 +6,8 @@ struct BriefPlaybackView: View {
     let brief: DailyBrief
     @State private var playback = BriefPlayback()
 
+    private var waiting: Bool { (brief.unfinishedTasks ?? 0) > 0 }
+
     var body: some View {
         VStack(spacing: 9) {
             Button {
@@ -24,8 +26,11 @@ struct BriefPlaybackView: View {
                 .background(FocusInk.text, in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(playback.loading || brief.spokenText.isEmpty || store is DemoStore)
-            if store is DemoStore {
+            .disabled(waiting || playback.loading || brief.spokenText.isEmpty || store is DemoStore)
+            if waiting {
+                Text("Waiting for overnight tasks to finish. Refresh to check again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if store is DemoStore {
                 Text("Connect to your Pi for narrated briefs.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if let message = playback.error {
@@ -33,6 +38,7 @@ struct BriefPlaybackView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
+        .onChange(of: waiting) { if waiting { playback.stop() } }
         .onDisappear { playback.stop() }
         .onChange(of: brief.spokenText) { playback.stop() }
         .onChange(of: brief.date) { playback.stop() }

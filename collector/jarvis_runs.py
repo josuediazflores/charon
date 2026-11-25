@@ -241,6 +241,8 @@ def _event_dates(doc):
     terminal = doc.get("status") in ("done", "error", "stopped")
     ended = _local_time(_text(doc, "updated_at") or _text(doc, "created_at")) if terminal else None
     due = _local_time(_text(doc, "run_at")) if doc.get("parent_id") else None
+    if due is None and not terminal:
+        due = _local_time(_text(doc, "created_at"))
     return ended, due
 
 
@@ -348,6 +350,7 @@ def daily_brief(root, queued, date_string, *, now=None, persist=True):
         raise RunError(400, "Choose a valid local date in YYYY-MM-DD format.")
     as_of = (now or datetime.now().astimezone()).astimezone()
     lock, cache = _brief_index(os.fspath(root))
+    unfinished = 0
     reports = []
     notes = []
     speech = []
@@ -362,6 +365,8 @@ def daily_brief(root, queued, date_string, *, now=None, persist=True):
     with lock:
         candidates = []
         for jid, (_, ended, due, planner) in _brief_dates(root, cache).items():
+            if not planner and due and start <= due < end and (ended is None or ended > as_of):
+                unfinished += 1
             phase = timing(ended, due)
             if not planner and phase:
                 candidates.append((ended if phase == "delivered" else due, jid))
@@ -436,4 +441,5 @@ def daily_brief(root, queued, date_string, *, now=None, persist=True):
                                 "## Spoken brief", spoken)) + "\n"
         if persist:
             _store_brief(root, date_string, written, bool(reports))
-    return {"date": date_string, "markdown": written, "spoken": spoken, "runs": reports}
+    return {"date": date_string, "markdown": written, "spoken": spoken, "runs": reports,
+            "unfinished_tasks": unfinished}

@@ -140,10 +140,11 @@ struct DailyBrief: Decodable {
     let date: String
     let markdown: String
     let spokenText: String
+    var unfinishedTasks: Int? = nil
     let runs: [OvernightRun]
 
     enum CodingKeys: String, CodingKey {
-        case date, markdown, runs
+        case date, markdown, runs, unfinishedTasks
         case spokenText = "spoken"
     }
 

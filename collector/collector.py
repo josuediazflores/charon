@@ -9940,6 +9940,8 @@ def make_handler(collector, token):
                 return self._json(503, {"error": "chat.base_dir is unset"})
             try:
                 brief = jarvis_runs.daily_brief(root, collector.jarvis_job_is_queued, day)
+                if brief["unfinished_tasks"]:
+                    return self._json(409, {"error": "Waiting for overnight tasks to finish. Refresh the brief after they finish."})
                 audio = jarvis_brief_audio.recording(collector.state_dir, brief["spoken"], digest)
             except jarvis_runs.RunError as exc:
                 return self._json(exc.code, {"error": str(exc)})

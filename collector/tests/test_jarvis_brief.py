@@ -80,6 +80,18 @@ class DailyBrief(unittest.TestCase):
                 conn.close()
         self.assertFalse((self.root/"daily").exists())
 
+    def test_narration_waits_for_all_scheduled_tasks_in_window(self):
+        parent = self.add(kind="intake")
+        self.add(parent_id=parent, run_at="2026-11-24T08:30:00Z")
+        child = self.add(parent_id=parent, status="idle", run_at="2026-11-24T20:00:00Z")
+        self.add(parent_id=parent, status="idle", run_at="2026-11-25T08:30:00Z")
+        path = self.jobs / (child + ".json")
+        doc = json.loads(path.read_text())
+        for status, count in (("idle", 1), ("running", 1), ("error", 0), ("stopped", 0), ("done", 0)):
+            doc["status"] = status
+            path.write_text(json.dumps(doc))
+            self.assertEqual(self.brief()["unfinished_tasks"], count)
+
     def test_archive_bounds_and_results(self):
         self.add(updated_at="2026-11-23T17:59:59")
         evening = self.add(updated_at="2026-11-24T02:00:00Z", result="Archived lead")
