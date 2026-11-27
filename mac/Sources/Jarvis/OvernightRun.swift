@@ -4,18 +4,26 @@ import Foundation
 struct OvernightRun: Decodable, Identifiable {
     let id: String
     let title: String
-    let status: String
+    var status: String
     let createdAt: String
-    let updatedAt: String
+    var updatedAt: String
     var request: String?
     var markdown: String?
     var error: String?
     var sources: [Source]?
     var files: [File]?
+    var kind: String?
+    var parentId: String?
+    var runAt: String?
+    var children: [OvernightRun]?
+    var proposal: [ProposedTask]?
+    var planningNote: String?
+    var confirmationStarted: Bool?
     var fromJobList = false
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, createdAt, updatedAt, request, markdown, error, sources, files
+        case kind, parentId, runAt, children, proposal, planningNote, confirmationStarted
     }
 
     struct Source: Decodable, Hashable {
@@ -32,10 +40,15 @@ struct OvernightRun: Decodable, Identifiable {
     }
 
     var name: String { title.isEmpty ? (request?.prefix(90)).map(String.init) ?? id : title }
+    var isPlanning: Bool { kind == "intake" || kind == "brain_dump" }
+    var active: Bool { ["idle", "queued", "running"].contains(status) }
+    var listTimestamp: String { status == "scheduled" ? runAt ?? updatedAt : updatedAt }
     var statusLabel: String {
         switch status {
-        case "done": return "Completed"
+        case "done" where kind == "brain_dump": return "Tasks queued"
+        case "done": return isPlanning ? "Plan ready" : "Completed"
         case "error": return "Failed"
+        case "review": return "Ready for review"
         case "needs-input": return "Needs input"
         default: return status.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -86,6 +99,45 @@ struct OvernightRun: Decodable, Identifiable {
         }
         return files?.first { $0.path == path.joined(separator: "/") }
     }
+}
+
+struct ProposedTask: Codable, Equatable {
+    var title: String
+    var goal: String
+    var context: String
+
+    func withSuggestedSources(_ input: String) -> ProposedTask? {
+        let links = input.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !links.isEmpty else { return self }
+        guard links.allSatisfy({ !$0.contains(where: { $0.isWhitespace }) && OvernightRun.webLink($0) != nil })
+        else { return nil }
+        var result = self
+        let instructions = "## Suggested sources\nUse these as starting points. Consult other sources as needed."
+        let sources = links.map { "- " + $0 }.joined(separator: "\n")
+        result.context = [context, instructions + "\n" + sources].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        return result
+    }
+
+    var valid: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.unicodeScalars.count <= 80 &&
+        !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && goal.unicodeScalars.count <= 4000 &&
+        context.unicodeScalars.count <= 4000
+    }
+}
+
+enum OvernightIntake {
+    static let textLimit = 12_000
+
+    static func nextStart(after date: Date = Date(), calendar: Calendar = .current) -> Date {
+        calendar.nextDate(after: date, matching: DateComponents(hour: 1, minute: 0, second: 0),
+                          matchingPolicy: .nextTime) ?? date.addingTimeInterval(86_400)
+    }
+}
+
+struct OvernightSubmissionError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 struct OvernightRunPage: Decodable {

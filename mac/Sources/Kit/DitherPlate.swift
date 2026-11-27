@@ -183,6 +183,8 @@ struct DitherPane: View {
             .background(
                 GeometryReader { geo in
                     Color.clear.onAppear { size(geo.size) }
+                        .onChange(of: Ground.family) { render() }
+                        .onChange(of: Ground.shared.glass) { render() }
                         .onChange(of: geo.size) { _, next in size(next) }
                 }
             )
@@ -198,12 +200,7 @@ struct DitherPane: View {
         guard pane.width > 0, pane.height > 0, scale > 0 else { return }
         let w = Swift.max(1, Int((pane.width / scale).rounded(.up)))
         let h = Swift.max(1, Int((pane.height / scale).rounded(.up)))
-        // The family rides in the key: the tokens are read through a cache
-        // SwiftUI cannot see move, so a plate keyed only on its size would sit
-        // there in the old family's inks. The shell re-identifies its content
-        // on a family switch, which throws this state away too -- this is the
-        // belt to that pair of braces, and it costs one string compare.
-        let key = "\(w)x\(h)/\(Ground.family.rawValue)"
+        let key = "\(w)x\(h)/\(Ground.family.rawValue)/\(Ground.shared.glass)"
         if key == painted { return }
         painted = key
 

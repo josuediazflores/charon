@@ -23,79 +23,42 @@ struct ConnectionSheet: View {
     @State private var probe: String?
     @State private var probing = false
 
+    private var candidate: Connection {
+        Connection(mode: mode, baseURL: baseURL, token: token)
+    }
+
+    private var canConnect: Bool { candidate.url?.host != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Icon(name: .gear, size: 14).foregroundStyle(M.inkMid)
-                Text("CONNECTION")
-                    .font(Face.body).tracking(1.1).foregroundStyle(M.inkMid)
-                Spacer(minLength: 8)
-                IconKey(icon: .close, label: "close") { dismiss() }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-
-            Hairline()
-
-            VStack(alignment: .leading, spacing: 0) {
-                Picker("", selection: $mode) {
-                    ForEach(Mode.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .font(Face.body)
-
-                Note(text: mode == .demo
-                     ? "A fixture mailbox in this process. Nothing reaches a network."
-                     : "The collector on the tailnet. Every request carries the token.",
-                     top: 10)
-
-                LabelledRule(text: "collector")
-
-                field("address", text: $baseURL, secure: false)
-                    .padding(.top, 10)
-                    .disabled(mode == .demo)
-                    .opacity(mode == .demo ? 0.5 : 1)
-
-                field("token", text: $token, secure: true)
-                    .padding(.top, 8)
-                    .disabled(mode == .demo)
-                    .opacity(mode == .demo ? 0.5 : 1)
-
-                Note(text: TokenStore.keychainRefused
-                     ? "the Keychain refused this build · the token is held for this "
-                        + "session only and is never written to preferences"
-                     : "stored in the Keychain · never in preferences")
-
-                HStack(spacing: 8) {
-                    KeyButton("Test", disabled: mode == .demo || probing) {
-                        Task { await test() }
-                    }
-                    if let probe {
-                        Text(probe)
-                            .font(Face.body).foregroundStyle(M.inkDim)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 12)
-
-                LabelledRule(text: "behaviour")
-
-                Note(text: "row note on · summary open · after archive: next message. "
-                     + "Fixed in this version.", top: 10)
-
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    KeyButton("Cancel", variant: .quiet) { dismiss() }
-                    KeyButton("Use this") {
-                        model.apply(Connection(mode: mode, baseURL: baseURL, token: token))
-                        dismiss()
-                    }
-                }
+            Text("Connection")
+                .font(FocusInk.heading(20))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
                 .padding(.top, 18)
+
+            ScrollView {
+                form.padding(20)
             }
-            .padding(14)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: mode == .demo ? 96 : 252)
+            Divider()
+            HStack {
+                if mode == .live {
+                    Button("Test connection") { Task { await test() } }
+                        .disabled(probing || !canConnect)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Apply") {
+                    model.apply(candidate)
+                    dismiss()
+                }
+                .disabled(mode == .live && !canConnect)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
         .frame(width: 440)
         .background(M.surface)
@@ -107,11 +70,43 @@ struct ConnectionSheet: View {
         }
     }
 
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Picker("Connection mode", selection: $mode) {
+                ForEach(Mode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .font(Face.body)
+
+            Note(text: mode == .demo
+                 ? "Explore Charon with sample data on this Mac."
+                 : "Read data and run actions through your collector.",
+                 top: 10)
+
+            if mode == .live {
+                field("Collector address", text: $baseURL, secure: false)
+                    .padding(.top, 10)
+
+                field("Collector token", text: $token, secure: true)
+                    .padding(.top, 8)
+
+                Note(text: TokenStore.keychainRefused
+                     ? "Keychain is unavailable. Credentials last for this session."
+                     : "Credentials are stored in Keychain.")
+
+                if let probe {
+                    Text(probe).font(.callout).foregroundStyle(HT.inkMid)
+                        .padding(.top, 8)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func field(_ label: String, text: Binding<String>, secure: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(Face.body).tracking(0.66).foregroundStyle(M.inkDim)
+            Text(label).font(.callout.weight(.medium)).foregroundStyle(M.inkMid)
             Group {
                 if secure {
                     SecureField("", text: text)
@@ -119,6 +114,7 @@ struct ConnectionSheet: View {
                     TextField("", text: text)
                 }
             }
+            .accessibilityLabel(label)
             .textFieldStyle(.plain)
             .font(Face.body)
             .foregroundStyle(M.inkBright)
@@ -131,17 +127,18 @@ struct ConnectionSheet: View {
     }
 
     private func test() async {
-        guard let url = Connection(mode: mode, baseURL: baseURL, token: token).url else {
-            probe = "not an address"
+        guard canConnect, let url = candidate.url else {
+            probe = "Enter a valid collector address."
             return
         }
+        let client = LiveClient(baseURL: url, token: token)
         probing = true
-        probe = "asking..."
-        let result = await LiveClient(baseURL: url, token: token).probe()
+        probe = "Testing connection…"
+        let result = await client.probe()
         probing = false
         switch result {
-        case .ok: probe = "ok · the collector answered"
-        case .unauthorized: probe = "401 · the token was refused"
+        case .ok: probe = "Connected to the collector."
+        case .unauthorized: probe = "The collector refused the token."
         case .unreachable(let why): probe = "unreachable · \(why)"
         }
     }

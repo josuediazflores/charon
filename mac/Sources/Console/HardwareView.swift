@@ -70,7 +70,32 @@ struct HardwareView: View {
         Cell(span: 12) {
             SourcePanel(env: payload.nodes, feedDown: feedDown,
                         title: "Nodes", glyph: .hardware, ticks: true, flush: true) { _ in
-                DataTable(columns: nodeColumns, rows: nodes, empty: "No nodes configured")
+                ViewThatFits(in: .horizontal) {
+                    DataTable(columns: nodeColumns, rows: nodes, empty: "No nodes configured")
+                        .frame(minWidth: 750)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if nodes.isEmpty { Text("No nodes configured").foregroundStyle(HT.inkMid) }
+                        ForEach(nodes) { node in
+                            DisclosureGroup {
+                                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 5) {
+                                    ForEach(nodeColumns.filter { $0.key != "host" && $0.key != "state" }, id: \.key) { col in
+                                        GridRow { Text(col.header).foregroundStyle(HT.inkMid); col.cell(node) }
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                            } label: {
+                                HStack {
+                                    Text(node.host).font(.body.weight(.medium))
+                                    Spacer()
+                                    Text(node.label.capitalized).foregroundStyle(node.tone.ink ?? HT.inkMid)
+                                }
+                            }
+                            .padding(.vertical, 5)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 10)
+                }
             }
         }
     }

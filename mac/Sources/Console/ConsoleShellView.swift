@@ -2,40 +2,7 @@ import AppKit
 import ImageIO
 import SwiftUI
 
-/* ── the shell ─────────────────────────────────────────────────────────
-     ◧ HALFTONE  │ $ Search nodes, commits      ⌘K    DEMO 1  ⟳  ▲▲▲ LIVE
-   > ◉ Overview  ├──────────────────────────────────────────────────────
-     ⏻ Hardware  │  TUESDAY 18 AUGUST
-     ▤ CMO       │  All sources reporting.
-     ✉ Mail      │
-     ❯ Chat      │  ┌─ PI-HOLE ───────────── pi-zero-w ▲▲▲ ┐
-     ✦ Jarvis    │  │ ads blocked today                    │
-     ⌘ Settings  │  │ 13,315                               │
-     ─────────── │
-     sources 7/7 │
-     last sync 4s│
-
-   The rail, the bar, and the one scroll container under them.
-
-   **Three things are decided here and nowhere else.**
-
-   *Which tab is showing*, which is this console's whole router: the web reads
-   it out of the address bar, and a native window has no address bar, so a
-   string of state stands in for the hash. The rule the hash encodes survives
-   the translation -- a cold start lands on the stored landing tab, validated
-   against the rail's own list, and falls back to Overview when that tab has
-   since been cut.
-
-   *Whether the sidebar is visible.* The Mac remembers the manual choice.
-   Mail can temporarily collapse it while a message is open.
-
-   *When the payload guard applies.* Settings is answered above it, because a
-   page made entirely of local preferences has nothing for a payload to add --
-   and under the guard it would be unreachable in exactly the state somebody
-   needs it in: a cold start against a dead Pi, where the landing tab makes the
-   Connecting panel a trap rather than an inconvenience.
-*/
-
+/// Shared navigation and window appearance for the console.
 struct ConsoleShellView: View {
 
     @State private var model = MailModel()
@@ -59,8 +26,7 @@ struct ConsoleShellView: View {
     @State private var tab: String = ConsoleSettings.shared.landing
     /// A reader can reveal the sidebar for its own message.
     @State private var expandedMailMessage: String?
-    /// Bumped by ⌘K. The command field watches it and puts the caret in.
-    @State private var commandFocus = 0
+    @State private var navigatorOpen = false
     /// The console pane's own width, for the padding step at 720. Measured on
     /// the pane rather than the window: the rail and the chrome are outside it.
     @State private var consoleWidth: CGFloat = 0
@@ -74,6 +40,8 @@ struct ConsoleShellView: View {
     /// died is a bug this file has already had.
     @State private var consoleWindow: NSWindow?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
 
     private var feedDown: Bool { model.feedDown }
@@ -97,59 +65,48 @@ struct ConsoleShellView: View {
 
     var body: some View {
         @Bindable var model = model
-        HStack(spacing: 0) {
-            // The rail or the strip, and the same answer whether or not a
-            // payload has landed: the rail appearing when the first poll
-            // returns would be a layout jump between two pictures of one route.
-            if collapsed {
-                RailStub(onShow: toggleSidebar)
-            } else {
+        GeometryReader { window in
+            HStack(spacing: 0) {
                 rail
-            }
+                    .frame(width: collapsed ? SidebarView.collapsedWidth : min(284, max(172, window.size.width * 0.185)))
+                    .clipped()
+                    .popover(isPresented: $navigatorOpen,
+                             attachmentAnchor: .point(UnitPoint(x: 1, y: 0.08)), arrowEdge: .trailing) {
+                        DestinationPicker(items: settings.landingOptions, current: tab) { destination in
+                            tab = destination
+                            navigatorOpen = false
+                        }
+                    }
 
-            VStack(spacing: 0) {
-                topBar
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: collapsed)
+            .environment(\.workspaceScale, min(1, max(0.72, window.size.width / 1536)))
         }
-        // **The ground family, as identity.** The tokens are read through a
-        // cache rather than through the environment -- `HT.surface3` is a
-        // static, and a static is a value SwiftUI has no way to notice changing
-        // -- so a panel drawn on the old ground would sit there on the new one
-        // until something else happened to repaint it. Naming the rail and the
-        // pane after the family throws both away and draws them again, which is
-        // a full repaint of everything on screen and is exactly what is wanted
-        // for a switch somebody makes about once. It is deliberately on this
-        // stack and not on the whole body: the poll, the payload watchers and
-        // the window chrome hang off the modifiers below, and re-identifying
-        // those would restart the poller to change a colour.
-        .id(settings.groundFamily)
+        .ignoresSafeArea(.container, edges: .top)
         // The window's own backdrop is the ground. The shell hands it through.
         .background(Color.clear)
         .frame(minWidth: 720, minHeight: 480)
         .preferredColorScheme(.dark)
-        // Above the rail, the bar and the pane, which is what makes it a
+        .toolbarBackgroundVisibility(Ground.shared.glass ? .hidden : .automatic, for: .windowToolbar)
+        // Above the rail and the pane, which makes it a
         // treatment of the console rather than a texture on one page.
         .overlay { if settings.scanlines { Scanlines() } }
+        .focusedSceneValue(\.destinationPickerOpen, $navigatorOpen)
+        .focusedSceneValue(\.consoleModel, model)
         .background { shortcuts }
-        // The wash is read here rather than inside the chrome, and that read is
-        // the whole of the live binding: the settings object is observed, so
-        // moving the slider re-runs this body, hands the configurator a
-        // different number, and `updateNSView` puts it on the layer in the same
-        // pass. No relaunch, and no notification to keep in step.
-        //
-        // The family rides the same path, for the same reason and by the same
-        // mechanism: the backdrop is behind the title bar as well as the
-        // content, so it is the one fill in the app the `.id` above cannot
-        // reach.
-        .background { WindowChrome(ground: settings.groundOpacity,
-                                   family: settings.ground,
-                                   picture: settings.backdrop) }
+        .background {
+            WindowChrome(wash: Ground.shared.glass
+                ? .glass(transparency: settings.glassTransparency, blur: settings.glassBlur,
+                         reduceTransparency: reduceTransparency)
+                : .standard(family: settings.ground, opacity: settings.groundOpacity, picture: settings.backdrop))
+        }
         .background { WindowProbe { probed in
             if consoleWindow !== probed { consoleWindow = probed }
         } }
-        // The Window menu and the title bar read this. One destination, one
-        // name, and no second opinion about where you are.
+        // Keep the destination name in the Window menu and accessibility tree.
         .navigationTitle(ConsoleNav.label(tab))
         .onChange(of: autoCollapseMessage) { _, _ in expandedMailMessage = nil }
         .onChange(of: settings.isEnabled(.messages)) { _, enabled in
@@ -205,13 +162,8 @@ struct ConsoleShellView: View {
 
     private var rail: some View {
         SidebarView(
-            name: "Halftone",
-            brandAside: AnyView(
-                Button(action: toggleSidebar) { Image(systemName: "sidebar.left") }
-                    .buttonStyle(.plain).foregroundStyle(HT.inkMid)
-                    .accessibilityLabel("Hide sidebar")
-                    .help("Hide sidebar (⌥⌘S)")
-            ),
+            collapsed: collapsed,
+            onToggle: toggleSidebar,
             items: settings.availableTabs,
             active: tab,
             onSelect: { tab = $0 },
@@ -219,78 +171,30 @@ struct ConsoleShellView: View {
     }
 
     private var railFooter: some View {
-        Panel(dense: true) {
-            VStack(alignment: .leading, spacing: 0) {
-                DotLeader(label: "sources", value: sourceCount)
-                DotLeader(label: "last sync", value: lastSync,
-                          tone: feedDown ? .caution : .default)
-            }
+        let status = feedDown ? "Offline" : (model.payload == nil ? "Connecting…" : "Connected")
+        let mode = model.connection.mode == .demo ? "Demo " + DemoMode.preference.rawValue : "Live"
+        let detail = [
+            mode,
+            (model.payload?.health).map { "\($0.ok) of \($0.total) sources reporting" },
+            model.fetchedAt.map { "Last sync \(Fmt.dur(model.now.timeIntervalSince($0))) ago" }
+        ].compactMap { $0 }.joined(separator: ". ")
+        return HStack(spacing: 9) {
+            Circle().fill(feedDown ? HT.fault : (model.payload == nil ? HT.inkMid : Color.green))
+                .frame(width: 10, height: 10)
+            if !collapsed { Text(status).fixedSize() }
         }
+        .foregroundStyle(Color(white: 0.79))
+        .help([status, detail].filter { !$0.isEmpty }.joined(separator: ". "))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status)
+        .accessibilityHint(detail)
     }
 
-    private var sourceCount: String {
-        let ok = model.payload?.health?.ok ?? 0
-        let total = model.payload?.health?.total ?? 0
-        return "\(ok)/\(total > 0 ? "\(total)" : "—")"
-    }
-
-    /// How long ago the document on screen arrived. Measured off the model's
-    /// own clock, which the poll moves -- so this counts up between ticks
-    /// rather than only when a fetch happens to succeed.
-    private var lastSync: String {
-        guard let at = model.fetchedAt else { return "—" }
-        return Fmt.dur(model.now.timeIntervalSince(at))
-    }
-
-    // MARK: - the bar
-
-    private var topBar: some View {
-        TopBar {
-            // Inert, on purpose: ⌘K puts the caret in it and nothing else
-            // happens. The reference searches nothing either, and porting the
-            // affordance without the behaviour is the faithful move.
-            CommandField(placeholder: "Search nodes, commits", focusToken: commandFocus)
-        } actions: {
-            if let demo = demoTag {
-                Text("DEMO \(demo)")
-                    .font(HT.body)
-                    .foregroundStyle(HT.c11)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            Button { Task { await model.refresh() } } label: {
-                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain).foregroundStyle(HT.inkMid)
-            .accessibilityLabel("Refresh")
-            StatusLamp(level: feedDown ? 0 : 3, of: 3,
-                       tone: feedDown ? .fault : .nominal,
-                       label: feedDown ? "offline" : "live")
-        }
-    }
-
-    /// Which fixture is on screen, or nil in live mode. The chip is the one
-    /// thing standing between a demo payload and being read as a reading.
-    private var demoTag: String? {
-        guard model.connection.mode == .demo else { return nil }
-        return DemoMode.preference.rawValue
-    }
-
-    /// ⌘K and the rail's own numbers. Everything else in this window is a
-    /// binding the tab that owns it declares.
-    ///
-    /// Keep each destination's usual number when another feature is turned off.
-    ///
-    /// Drawn the way ⌘K is drawn, which is not at all: transparent, out of the
-    /// hit test and out of the accessibility tree, because the visible control
-    /// for each of these is the rail row it selects.
+    /// Keep each destination's usual shortcut when another feature is turned off.
     private var shortcuts: some View {
         ZStack {
             Button("Toggle sidebar", action: toggleSidebar)
                 .keyboardShortcut("s", modifiers: [.option, .command])
-
-            Button("Search nodes, commits") { commandFocus &+= 1 }
-                .keyboardShortcut("k", modifiers: .command)
 
             ForEach(Array(ConsoleNav.items.enumerated()), id: \.element.id) { i, item in
                 if settings.isTabAvailable(item.id) {
@@ -404,14 +308,6 @@ struct ConsoleShellView: View {
 /* The window itself: one ground to the edges, including the band the traffic
    lights sit in.
 
-   The mail app hid the title bar and stood its own bar in its place, which
-   worked while the window held one pane. It cannot hold a rail: the lights
-   would land on the brand row, and on the twenty-eight-point strip the rail
-   collapses to they would land on nothing at all. So the title bar is back and
-   painted out -- transparent, no separator -- which leaves the console below it
-   laid out exactly as the reference lays it out, and puts the current tab's
-   name somewhere it can actually be read.
-
    **The ground is the window's, not the console's.** The window is made
    non-opaque and its own colour cleared, and a `GroundBackdrop` -- a blur of
    whatever is behind the window, washed over with the ground of the family
@@ -463,17 +359,13 @@ private struct WindowProbe: NSViewRepresentable {
     }
 }
 
+private enum WindowWash: Equatable {
+    case standard(family: GroundFamily, opacity: Double, picture: Double)
+    case glass(transparency: Double, blur: Double, reduceTransparency: Bool)
+}
+
 private struct WindowChrome: NSViewRepresentable {
-
-    /// How much of the blur the wash leaves showing, this pass.
-    var ground: Double
-
-    /// Which ground it is a wash of, this pass.
-    var family: GroundFamily
-
-    /// How strongly the picture behind that wash is printed, this pass. Zero
-    /// is no picture.
-    var picture: Double
+    let wash: WindowWash
 
     func makeNSView(context: Context) -> NSView {
         let probe = NSView(frame: .zero)
@@ -493,65 +385,16 @@ private struct WindowChrome: NSViewRepresentable {
         window.titlebarSeparatorStyle = .none
         window.isOpaque = false
         window.backgroundColor = .clear
-        styleWindowButtons(in: window)
-        mount(in: window)?.wash(ground, of: family, picture: picture)
+        mount(in: window)?.apply(wash)
     }
 
-    /// Clip only the painted lights. AppKit still owns the full button hit areas,
-    /// hover symbols, accessibility actions and window arrangement menu.
-    private func styleWindowButtons(in window: NSWindow) {
-        let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-        let maskName = "CharonPixelWindowLight"
-        for kind in kinds {
-            guard let button = window.standardWindowButton(kind) else { continue }
-            button.wantsLayer = true
-            guard let layer = button.layer, !layer.bounds.isEmpty else { continue }
-            let scale = window.backingScaleFactor
-            if let installed = layer.mask {
-                guard installed.name == maskName else { continue }
-                if installed.frame == layer.bounds && installed.contentsScale == scale { continue }
-            }
-
-            // Inscribe the stepped circle in the native light. Snap each edge to
-            // the backing grid so the shape keeps its size on 1x and 2x screens.
-            let diameter = min(12, layer.bounds.width, layer.bounds.height)
-            let cell = diameter / 7
-            let originX = (layer.bounds.width - diameter) / 2
-            let originY = (layer.bounds.height - diameter) / 2
-            func snap(_ point: CGFloat) -> CGFloat { (point * scale).rounded() / scale }
-
-            let path = CGMutablePath()
-            for (row, inset) in [2, 1, 0, 0, 0, 1, 2].enumerated() {
-                let left = snap(originX + CGFloat(inset) * cell)
-                let right = snap(originX + CGFloat(7 - inset) * cell)
-                let bottom = snap(originY + CGFloat(row) * cell)
-                let top = snap(originY + CGFloat(row + 1) * cell)
-                path.addRect(CGRect(x: left, y: bottom, width: right - left, height: top - bottom))
-            }
-
-            let mask = CAShapeLayer()
-            mask.name = maskName
-            mask.frame = layer.bounds
-            mask.contentsScale = scale
-            mask.path = path
-            layer.mask = mask
-        }
-    }
-
-    /// Put the backdrop at the very back of the frame view, once, and hand it
-    /// back either way. Re-checked on every pass rather than remembered: the
-    /// frame view is replaced when the window goes full screen, and a backdrop
-    /// held in a `@State` would go with it and leave the window see-through --
-    /// which is also why the one that is already there is returned rather than
-    /// replaced, so a pass that only carries a new wash is a new wash.
     private func mount(in window: NSWindow) -> GroundBackdrop? {
         guard let frameView = window.contentView?.superview else { return nil }
         if let standing = frameView.subviews.first(where: {
             $0.identifier == GroundBackdrop.id
         }) as? GroundBackdrop { return standing }
 
-        let backdrop = GroundBackdrop(frame: frameView.bounds, wash: ground,
-                                      of: family, picture: picture)
+        let backdrop = GroundBackdrop(frame: frameView.bounds)
         frameView.addSubview(backdrop, positioned: .below, relativeTo: nil)
         return backdrop
     }
@@ -576,15 +419,10 @@ private final class GroundBackdrop: NSVisualEffectView {
     /// fill in one place, which is the whole rule.
     private let plate = NSView()
 
-    /// What is currently on the two layers, as the three things that decide it.
-    /// Held so the chrome can be re-applied on every pass without touching a
-    /// layer on the passes that change nothing.
-    private var applied: Double = .nan
-    private var appliedFamily: GroundFamily?
-    private var appliedArt: Double = .nan
+    private let tint = CAGradientLayer()
+    private var applied: WindowWash?
 
-    init(frame frameRect: NSRect, wash opacity: Double, of family: GroundFamily,
-         picture strength: Double) {
+    override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         identifier = Self.id
         material = .underWindowBackground
@@ -612,38 +450,64 @@ private final class GroundBackdrop: NSVisualEffectView {
         art.layer?.contentsGravity = .resizeAspectFill
         art.layer?.masksToBounds = true
 
-        wash(opacity, of: family, picture: strength)
+        tint.startPoint = CGPoint(x: 0.95, y: 1)
+        tint.endPoint = CGPoint(x: 0.15, y: 0.25)
+        tint.locations = [0, 0.30, 0.66]
+        tint.frame = plate.bounds
+        tint.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        plate.layer?.addSublayer(tint)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not from a nib") }
 
-    /// Set the picture and the fill. Called on every chrome pass, so it does
-    /// nothing unless the colour, the alpha or the picture moved.
-    ///
-    /// The ground is taken from the family passed in rather than read off
-    /// `HT.void`, so this cannot land a stale wash on a pass that arrived
-    /// before the token cache did.
-    func wash(_ opacity: Double, of family: GroundFamily, picture strength: Double) {
-        guard opacity != applied || family != appliedFamily || strength != appliedArt
-        else { return }
-        applied = opacity
-        appliedFamily = family
-        appliedArt = strength
-        // Explicitly unanimated: a layer colour is one of the properties Core
-        // Animation will cross-fade on its own given the chance, and the only
-        // motion in this console is a cursor.
+    func apply(_ wash: WindowWash) {
+        guard applied != wash else { return }
+        applied = wash
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        plate.layer?.backgroundColor = NSColor(family.palette.void)
-            .withAlphaComponent(opacity).cgColor
-        // Cleared rather than faded to nothing at zero, so the layer is not
-        // carrying a picture nobody can see. The decode behind it is a lazy
-        // static and runs once: a console left at zero never pays for it at
-        // all.
-        art.alphaValue = strength
-        art.layer?.contents = strength > 0 ? BackdropPicture.image : nil
+        switch wash {
+        case let .standard(family, opacity, strength):
+            material = .underWindowBackground
+            setBlurStrength(1)
+            tint.isHidden = true
+            plate.layer?.backgroundColor = NSColor(family.palette.void).withAlphaComponent(opacity).cgColor
+            art.alphaValue = strength
+            art.layer?.contents = strength > 0 ? BackdropPicture.image : nil
+        case let .glass(transparency, blur, reduceTransparency):
+            material = .hudWindow
+            setBlurStrength(reduceTransparency ? 0 : blur)
+            art.layer?.contents = nil
+            plate.layer?.backgroundColor = nil
+            tint.isHidden = false
+            // Leave the upper-right open to the scenery. Darken the reading edge
+            // more when the user dials down blur and sharp highlights come through.
+            let transmission = reduceTransparency ? 0 : transparency
+            tint.colors = [
+                NSColor(white: 0.16, alpha: 1 - transmission).cgColor,
+                NSColor(white: 0.10, alpha: 1 - transmission * (0.55 + 0.20 * blur)).cgColor,
+                NSColor(white: 0.07, alpha: 1 - transmission * (0.37 + 0.20 * blur)).cgColor
+            ]
+        }
         CATransaction.commit()
+    }
+
+    private var blurStrength: Double = 1
+
+    private func setBlurStrength(_ strength: Double) {
+        guard strength != blurStrength else { return }
+        blurStrength = strength
+        // AppKit applies the mask to the desktop material alone. The tint,
+        // window controls and text keep their own opacity.
+        // The HUD material transmits about three fifths of clear glass contrast.
+        // Account for that difference so the middle of the slider visibly softens detail.
+        let materialContrast = 0.60
+        let coverage = strength / (strength + (1 - strength) * materialContrast)
+        maskImage = strength == 1 ? nil : NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
+            NSColor.white.withAlphaComponent(coverage).setFill()
+            rect.fill(using: .copy)
+            return true
+        }
     }
 
     override func layout() {

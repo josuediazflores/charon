@@ -14,7 +14,7 @@ import Foundation
  * reader physically cannot disagree in a demo, which is exactly the bug a
  * fixture would otherwise be very good at hiding.
  *
- * **Nothing here reaches a network.** Of everything in this app, a write that
+ * Only an explicitly configured loopback preview planner can process Brain Dump notes. Of everything in this app, a write that
  * touched a real mailbox from a fixture is the one with consequences that
  * cannot be taken back.
  *
@@ -49,6 +49,16 @@ final class DemoStore: MailStore {
     /// the same reason the ask threads are held here.
     private let chat: DemoChatStore
     private let jarvis: DemoJarvisStore
+    private var intakePlans: [OvernightRun] = []
+    private let previewPlanner: LiveClient? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let value = env["CHARON_PREVIEW_PORT"], let port = UInt16(value), port > 0,
+              let token = env["CHARON_PREVIEW_TOKEN"], !token.isEmpty,
+              let url = URL(string: "http://127.0.0.1:\(port)") else { return nil }
+        return LiveClient(baseURL: url, token: token)
+    }()
+    var hasPreviewPlanner: Bool { previewPlanner != nil }
+
     private let msgs: DemoMessagesStore
 
     /// Which of the four demo payloads the console draws around the mailbox.
@@ -400,12 +410,80 @@ final class DemoStore: MailStore {
     func jarvisToday() async throws -> JarvisDay? { jarvis.todayRecord() }
     func jarvisDays() async -> [JarvisDaySummary]? { jarvis.daySummaries() }
     func jarvisDay(_ day: String) async throws -> JarvisDay? { jarvis.day(day) }
+    func processBrainDump(requestID: UUID, text: String) async throws -> String {
+        guard let planner = previewPlanner else {
+            let id = requestID.uuidString.lowercased()
+            if intakePlans.contains(where: { $0.id == id }) { return id }
+            let lines = text.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard !lines.isEmpty, lines.count <= 24, text.unicodeScalars.count <= OvernightIntake.textLimit,
+                  lines.allSatisfy({ $0.unicodeScalars.count <= 4000 }) else {
+                throw OvernightSubmissionError(message: "Use up to 24 lines, with up to 4,000 characters per task.")
+            }
+            let tasks = lines.map { goal in
+                ProposedTask(title: String(goal.unicodeScalars.prefix(80)), goal: goal, context: "")
+            }
+            let now = Fmt.stampNow()
+            intakePlans.insert(OvernightRun(id: id, title: "Brain Dump", status: "review",
+                                            createdAt: now, updatedAt: now, request: text,
+                                            kind: "brain_dump", proposal: tasks), at: 0)
+            return id
+        }
+        let id = try await planner.processBrainDump(requestID: requestID, text: text)
+        if !intakePlans.contains(where: { $0.id == id }) {
+            let at = Fmt.stampNow()
+            intakePlans.insert(OvernightRun(id: id, title: "Brain Dump", status: "queued",
+                                            createdAt: at, updatedAt: at, request: text, kind: "brain_dump"), at: 0)
+        }
+        return id
+    }
+
+    func confirmBrainDump(id: String, tasks: [ProposedTask], runAt: Date) async throws {
+        guard let index = intakePlans.firstIndex(where: { $0.id == id }) else { throw MailError.badKey }
+        if intakePlans[index].status == "done" { return }
+        guard runAt > Date() else { throw OvernightSubmissionError(message: "Choose a future start time.") }
+        guard !tasks.isEmpty, tasks.count <= 24, tasks.allSatisfy(\.valid) else {
+            throw OvernightSubmissionError(message: "Review the tasks before scheduling.")
+        }
+        let start = ISO8601DateFormatter().string(from: runAt)
+        let at = Fmt.stampNow()
+        intakePlans[index].children = tasks.map {
+            OvernightRun(id: UUID().uuidString.lowercased(), title: $0.title, status: "scheduled",
+                         createdAt: at, updatedAt: at, request: [$0.goal, $0.context].joined(separator: "\n\n"),
+                         parentId: id, runAt: start)
+        }
+        intakePlans[index].runAt = start
+        intakePlans[index].proposal = tasks
+        intakePlans[index].status = "done"
+    }
+
+    private var demoIntakeRuns: [OvernightRun] {
+        intakePlans.flatMap { original -> [OvernightRun] in
+            var plan = original
+            let children = (plan.children ?? []).map { original -> OvernightRun in
+                var child = original
+                if child.status == "scheduled", let date = Fmt.date(child.runAt), date <= Date() {
+                    child.status = "done"
+                    child.markdown = "This is a sample report for the scheduled demo task."
+                    child.updatedAt = child.runAt ?? child.updatedAt
+                }
+                return child
+            }
+            plan.children = children
+            return [plan] + children
+        }
+    }
+
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage {
-        OvernightRunPage(runs: jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
+        OvernightRunPage(runs: demoIntakeRuns + jarvis.jobList().map(OvernightRun.legacy), nextCursor: nil)
     }
 
     func overnightRun(id: String) async throws -> OvernightRun? {
-        jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
+        if let pending = intakePlans.first(where: { $0.id == id }), pending.active, let planner = previewPlanner {
+            guard let run = try await planner.overnightRun(id: id) else { return nil }
+            if let index = intakePlans.firstIndex(where: { $0.id == id && $0.active }) { intakePlans[index] = run }
+        }
+        return demoIntakeRuns.first { $0.id == id } ?? jarvis.jobList().first { $0.id == id }.map(OvernightRun.legacy)
     }
 
     func overnightFile(run: String, file: String) async throws -> URL? { nil }
@@ -425,7 +503,16 @@ final class DemoStore: MailStore {
         jarvis.file(text: text, title: title)
     }
 
-    func jarvisJobStop(id: String) async -> WriteResult { jarvis.stopJob(id) }
+    func jarvisJobStop(id: String) async -> WriteResult {
+        for plan in intakePlans.indices {
+            if let index = intakePlans[plan].children?.firstIndex(where: { $0.id == id }) {
+                intakePlans[plan].children?[index].status = "stopped"
+                intakePlans[plan].children?[index].updatedAt = Fmt.stampNow()
+                return .ok
+            }
+        }
+        return jarvis.stopJob(id)
+    }
 
     /// **Nil is the honest demo answer.** There is no Mac behind a fixture, so
     /// the voice degrades exactly as it does when the real one is asleep -- which

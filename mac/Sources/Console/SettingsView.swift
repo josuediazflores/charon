@@ -23,7 +23,7 @@ import UniformTypeIdentifiers
  * rework.
  *
  * **Not every row is a control.** Three of them are readouts, and one of those
- * three is a fence: how sending and archiving work is stated here precisely
+ * three is a fence: Sending and archiving is stated here precisely
  * because Settings is the first place somebody goes to look for the switch that
  * turns the send confirm off. A page that stayed silent about it would read as
  * a page that has not got round to it yet, rather than as the answer.
@@ -38,6 +38,7 @@ struct SettingsView: View {
     /// panel and for nothing else on this page.
     var model: MailModel
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let settings = ConsoleSettings.shared
 
     // ── the messages allowlist, which lives on the Pi ──
@@ -89,34 +90,29 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: HT.row) {
-            PageHead(title: "Settings", subtitle: "how this console behaves")
-            KeyButton("Connection") { model.showingConnection = true }
-
-            // Cap prose and control rows at a comfortable reading width.
-            VStack(alignment: .leading, spacing: HT.row) {
-                HTGrid {
-                    Cell(span: 12) { features }
-                    if settings.isEnabled(.mail) {
-                        Cell(span: 12) { mail }
-                    }
-                    if settings.isEnabled(.messages) {
-                        Cell(span: 12) { messages }
-                    }
-                    if settings.isEnabled(.cmo) {
-                        Cell(span: 12) { briefing }
-                    }
-                    Cell(span: 12) { console }
-                    Cell(span: 12) { machine }
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                PageHead(title: "Settings")
+                Button("Connection…") { model.showingConnection = true }
             }
-            .frame(maxWidth: HT.cw * 124, alignment: .leading)
+
+            appearance
+            features
+            if settings.isEnabled(.mail) { mail }
+            if settings.isEnabled(.messages) { messages }
+            if settings.isEnabled(.cmo) { briefing }
+            console
+            machine
         }
+        .frame(maxWidth: 730, alignment: .leading)
     }
 
     private var features: some View {
         Panel(title: "Features") {
             VStack(alignment: .leading, spacing: 0) {
+                SettingsNote(model.connection.mode == .live
+                    ? "Turning off a feature hides its tab and pauses its jobs on the connected Pi."
+                    : "Choose which features appear in the sidebar on this Mac.")
                 ForEach(ConsoleFeature.allCases, id: \.self) { feature in
                     if model.connection.mode == .live {
                         let client = model.store as? LiveClient
@@ -134,9 +130,6 @@ struct SettingsView: View {
                         }
                     }
                 }
-                SettingsNote(model.connection.mode == .live
-                    ? "Off pauses this feature on the connected Pi and hides its tab. On resumes its previously active jobs. Saved work stays available for resume."
-                    : "Choose which features appear in Demo on this Mac.")
             }
         }
     }
@@ -144,38 +137,24 @@ struct SettingsView: View {
     // MARK: - the mail program
 
     private var mail: some View {
-        Panel(title: "Mail", meta: AnyView(meta("the mail program"))) {
+        Panel(title: "Mail") {
             VStack(alignment: .leading, spacing: 0) {
-                ToggleRow(label: "collapse the rail while reading",
+                ToggleRow(label: "Collapse sidebar while reading",
                           on: settings.railCollapse) {
                     settings.railCollapse.toggle()
                 }
-                SettingsNote("Hide the sidebar when a message opens. Closing the reader restores "
-                             + "your usual sidebar layout.")
 
-                ToggleRow(label: "show the ai line under each row", on: settings.rowNote) {
+                ToggleRow(label: "Show triage details in the inbox", on: settings.rowNote) {
                     settings.rowNote.toggle()
                 }
-                SettingsNote("Line three of a row: the tags, whether a reply is queued or "
-                             + "sent, and the machine's one-line reading of the message. Off "
-                             + "is a tighter inbox of sender, subject and time. It is also "
-                             + "where a message says it has not been triaged yet, so off "
-                             + "hides the only per-row sign that triage is behind. The "
-                             + "count above the list still says how many are waiting. A send "
-                             + "that failed is not on that line at all: it is a mark on line "
-                             + "one, because nothing above the list counts one.")
+                SettingsNote("Shows tags, triage status and a one-line summary. Failed sends are always visible.")
 
-                ToggleRow(label: "open the ai summary with the message",
+                ToggleRow(label: "Expand summaries when opening mail",
                           on: settings.summaryOpen) {
                     settings.summaryOpen.toggle()
                 }
-                SettingsNote("Off, the sender's own words are the first thing on the page and "
-                             + "the reading of them waits to be asked for. The SUMMARY key "
-                             + "still opens it wherever there is a reading. On a message "
-                             + "triage has not reached there is none, and the key is off with "
-                             + "it. Closing one has never carried to the next.")
 
-                ChoiceRow(label: "after archiving, go to",
+                ChoiceRow(label: "After archiving, open",
                           value: settings.afterArchive == .inbox ? "the inbox" : "the next message",
                           options: afterArchive) { picked in
                     // The answer is rebuilt from the two words rather than cast
@@ -184,10 +163,7 @@ struct SettingsView: View {
                     // somebody adds a third and forgets this line.
                     settings.afterArchive = picked == "the inbox" ? .inbox : .next
                 }
-                SettingsNote("The next message is a walk through the morning: file it, read "
-                             + "the one behind it, and stop when the inbox does. The inbox is "
-                             + "one message at a time. Either way the last message in the list "
-                             + "ends on the inbox, because there is nothing behind it.")
+                SettingsNote("After the last message, the inbox opens.")
 
                 // **None of these five may ever become a switch.** They are what
                 // makes it safe to point a model at a mailbox at all, and every
@@ -196,17 +172,12 @@ struct SettingsView: View {
                 // They are written down here rather than nowhere because this is
                 // the page that gets searched for the way to turn the confirm
                 // off, and the answer is that there is not one.
-                DotLeader(label: "how sending and archiving work", value: "fixed",
-                          labelInk: HT.inkBright)
-                SettingsNote("Sending is your click and nothing else: no model is anywhere "
-                             + "in the send path. The recipient is recomputed on the Pi from "
-                             + "the message being replied to, and is never sent from this "
-                             + "Mac. Replies only: nothing here can open a thread with "
-                             + "somebody. Nothing retries a send that failed; it is reported "
-                             + "and left where you can see it. Archiving is IMAP \\Deleted "
-                             + "plus an expunge, which is Gmail's archive only while that "
-                             + "account's auto-expunge is on, and nothing on this Mac can "
-                             + "check which mode it is in.")
+                Divider().padding(.vertical, 8)
+                Text("Sending and archiving")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.bottom, 4)
+                SettingsNote("Replies go to the original sender after you confirm. A failed send stays in the outbox. Archiving uses IMAP deletion and expunge. Gmail treats this as an archive when auto-expunge is on.")
             }
         }
     }
@@ -252,59 +223,59 @@ struct SettingsView: View {
     private var bridge: MessagesBridge? { model.messagesData?.bridge }
 
     private var messages: some View {
-        Panel(title: "Messages", meta: AnyView(meta("the imessage bridge"))) {
+        Panel(title: "Messages") {
             VStack(alignment: .leading, spacing: 0) {
                 // Six readouts, and every one of them is the heartbeat's own
                 // word rather than this app's opinion of it. A field no
                 // heartbeat has ever carried says `unknown` in dim ink, which
                 // is a different fact from `no`.
-                DotLeader(label: "bridge", value: reporting ? "live" : "absent",
+                DotLeader(label: "Bridge", value: reporting ? "live" : "absent",
                           tone: reporting ? .nominal : .caution,
                           labelInk: HT.inkBright)
-                DotLeader(label: "helper", value: bridge?.helper ?? "unknown",
+                DotLeader(label: "Helper", value: bridge?.helper ?? "unknown",
                           dim: bridge?.helper == nil, labelInk: HT.inkBright)
-                DotLeader(label: "full disk access", value: granted(bridge?.fda),
+                DotLeader(label: "Full Disk Access", value: granted(bridge?.fda),
                           tone: tone(bridge?.fda), dim: bridge?.fda == nil,
                           labelInk: HT.inkBright)
-                DotLeader(label: "automation → messages", value: granted(bridge?.automation),
+                DotLeader(label: "Messages automation", value: granted(bridge?.automation),
                           tone: tone(bridge?.automation), dim: bridge?.automation == nil,
                           labelInk: HT.inkBright)
-                DotLeader(label: "last event",
+                DotLeader(label: "Last event",
                           value: bridge?.lastEventAt.map { Fmt.relTime($0) + " ago" }
                               ?? "unknown",
                           dim: bridge?.lastEventAt == nil, labelInk: HT.inkBright)
-                DotLeader(label: "cursor",
+                DotLeader(label: "Database cursor",
                           value: bridge?.cursor.map { "rowid \(Fmt.num($0))" } ?? "unknown",
                           dim: bridge?.cursor == nil, labelInk: HT.inkBright)
-                SettingsNote("Runs on this Mac as a login item. Only allowlisted chats "
-                             + "leave the Mac; they go to the Pi over Tailscale like mail "
-                             + "does.")
+                SettingsNote("Bridge runs at login. It shares only allowed chats with the Pi over Tailscale.")
 
+                ActionRow(label: "Open Charon Bridge", title: "Open",
+                          disabled: bridgeApp == nil, act: openBridge)
+                ActionRow(label: "Show Bridge in Finder", title: "Reveal",
+                          disabled: bridgeApp == nil, act: revealBridge)
+
+                Divider().padding(.vertical, 12)
+                Text("Allowed chats")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
                 allowlist
 
-                ActionRow(label: "allow a chat", title: adding ? "cancel" : "add") {
+                ActionRow(label: "Allow a chat", title: adding ? "Cancel" : "Add") {
                     adding.toggle()
                     if adding { allowlistRefresh += 1 }
                 }
                 if adding {
-                    ChoiceRow(label: "chat",
-                              value: candidates.isEmpty ? "nothing to add" : "choose",
+                    ChoiceRow(label: "Chat",
+                              value: candidates.isEmpty ? "No chats available" : "Choose a chat",
                               options: candidates.map(candidateLabel)) { picked in
                         allow(picked)
                     }
                 }
-                SettingsNote("confirm: charon drafts, you click SEND. auto: charon may "
-                             + "send on its own in that chat. Everything sends from your "
-                             + "number, as you.")
+                SettingsNote("With Confirm, you approve each draft before Bridge sends it from your number. Auto is reserved for a future version.")
 
                 if let allowFault {
                     SettingsNote(allowFault)
                 }
-
-                ActionRow(label: "open Charon Bridge", title: "open",
-                          disabled: bridgeApp == nil, act: openBridge)
-                ActionRow(label: "reveal bridge in Finder", title: "reveal",
-                          disabled: bridgeApp == nil, act: revealBridge)
             }
         }
         .task(id: allowlistRefresh) { await loadAllowlist() }
@@ -336,7 +307,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var allowlist: some View {
         if config == nil {
-            SettingsNote("reading the allowlist from the collector…")
+            SettingsNote("Reading allowed chats from the collector…")
         } else {
             DataTable(
                 columns: [
@@ -368,7 +339,7 @@ struct SettingsView: View {
                     }),
                 ],
                 rows: allowRows,
-                empty: "No chat is allowlisted. Nothing leaves this Mac.",
+                empty: "No chats are shared with the Pi.",
                 dense: true)
             .padding(.top, HT.s2)
             .padding(.bottom, HT.s3)
@@ -426,7 +397,7 @@ struct SettingsView: View {
                 allowFault = nil
             } else {
                 config = rollback
-                allowFault = "not saved · the collector did not take it."
+                allowFault = "The collector could not save this change."
             }
         }
     }
@@ -458,113 +429,115 @@ struct SettingsView: View {
     // MARK: - the 6am cmo
 
     private var briefing: some View {
-        Panel(title: "Briefing", meta: AnyView(meta("the 6am cmo"))) {
+        Panel(title: "Briefing") {
             VStack(alignment: .leading, spacing: 0) {
-                DotLeader(label: "the briefing runs on", value: "opus · effort high",
+                DotLeader(label: "Briefing model", value: "Opus · High effort",
                           labelInk: HT.inkBright)
-                SettingsNote("Eighty turns, inside a 4500 second wall, and at most two "
-                             + "attempts: one retry five minutes later, then it gives up "
-                             + "until tomorrow. Those are edited in run-cmo.sh on the Pi and "
-                             + "deliberately not here: the turn budget only means anything "
-                             + "next to the wall clock beside it, and a console that could "
-                             + "raise one without the other would be a run that dies at the "
-                             + "timeout every morning with a briefing half written.")
+                SettingsNote("The Pi allows up to 80 turns in 75 minutes and retries once after five minutes. Change these limits in run-cmo.sh on the Pi.")
             }
         }
     }
 
     // MARK: - the shell
 
-    private var console: some View {
-        Panel(title: "Console", meta: AnyView(meta("around every tab"))) {
+    private var appearance: some View {
+        @Bindable var settings = settings
+        return Panel(title: "Appearance") {
             VStack(alignment: .leading, spacing: 0) {
-                ChoiceRow(label: "open the console on",
+                ToggleRow(label: "Glass appearance", on: Ground.shared.glass) {
+                    Ground.shared.glass.toggle()
+                }
+                SettingsNote(Ground.shared.glass && reduceTransparency
+                    ? "Reduce Transparency is on. Glass uses a solid charcoal background."
+                    : "Let the colors behind the window show through frosted glass.")
+                if Ground.shared.glass {
+                    if !reduceTransparency {
+                        glassSlider("Glass transparency", value: $settings.glassTransparency,
+                                    range: ConsoleSettings.glassTransparencyRange)
+                        glassSlider("Glass blur", value: $settings.glassBlur,
+                                    range: ConsoleSettings.glassBlurRange)
+                    }
+                } else {
+                    SliderRow(label: "Backdrop strength",
+                              value: settings.backdrop,
+                              range: backdropRange,
+                              step: 0.05,
+                              grain: 0.01,
+                              readout: "\(Int((settings.backdrop * 100).rounded()))%") { shown in
+                        settings.backdrop = shown
+                    }
+                    SettingsNote("Set to 0% to hide the backdrop image.")
+
+                    SliderRow(label: "Window transparency",
+                              value: transparency,
+                              range: transparencyRange,
+                              // Five points of the number beside it per press, and
+                              // one point per click: the arrows are for choosing,
+                              // the track is for landing.
+                              step: 0.05,
+                              grain: 0.01,
+                              readout: "\(Int((transparency * 100).rounded()))%") { shown in
+                        settings.groundOpacity = 1 - shown
+                    }
+                    ChoiceRow(label: "Background color",
+                              value: settings.ground.label,
+                              options: GroundFamily.labels) { picked in
+                        if let family = GroundFamily.named(picked) {
+                            settings.groundFamily = family.rawValue
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func glassSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(FocusInk.body).foregroundStyle(FocusInk.text)
+                .accessibilityHidden(true)
+            Spacer(minLength: 8)
+            Slider(value: value, in: range, step: 0.01) { Text(label) }
+                .labelsHidden()
+                .controlSize(.small)
+                .tint(FocusInk.sand)
+                .frame(maxWidth: 135)
+                .accessibilityValue(value.wrappedValue.formatted(.percent))
+            Text(value.wrappedValue.formatted(.percent))
+                .monospacedDigit().foregroundStyle(HT.inkMid)
+                .frame(width: 38, alignment: .trailing)
+                .accessibilityHidden(true)
+        }
+        .frame(minHeight: 28)
+    }
+
+    private var console: some View {
+        Panel(title: "Console") {
+            VStack(alignment: .leading, spacing: 0) {
+                ChoiceRow(label: "Open at launch",
                           value: ConsoleNav.label(settings.landing),
                           options: settings.landingOptions.map(\.label)) { picked in
                     if let item = settings.landingOptions.first(where: { $0.label == picked }) {
                         settings.landingTab = item.id
                     }
                 }
-                SettingsNote("Only a cold start. Whichever tab you were on stays where it is "
-                             + "for as long as the window is open, and a landing tab this "
-                             + "console does not have opens Overview, which is what keeps a "
-                             + "preference written by an older build from quietly becoming "
-                             + "home.")
-
-                ToggleRow(label: "crt scanlines", on: settings.scanlines) {
+                ToggleRow(label: "CRT scanlines", on: settings.scanlines) {
                     settings.scanlines.toggle()
                 }
-                SettingsNote("Atmosphere, over the whole shell. It is paid for in legibility "
-                             + "on exactly the dense figures this console exists to print, so "
-                             + "it is off out of the box.")
-
-                // Behind the window, and directly above the slider that says
-                // how much of behind is read: the two rows are one sentence,
-                // and the slider's own note finishes it by naming whichever of
-                // the two things is actually back there. The same track and the
-                // same step as that one, because they are the same kind of
-                // question asked about two layers.
-                SliderRow(label: "backdrop",
-                          value: settings.backdrop,
-                          range: backdropRange,
-                          step: 0.05,
-                          grain: 0.01,
-                          readout: "\(Int((settings.backdrop * 100).rounded()))%") { shown in
-                    settings.backdrop = shown
-                }
-                SettingsNote("A picture behind the window, standing where the desktop "
-                             + "stands. It is printed faintly on purpose: the desktop back "
-                             + "there arrives blurred and this does not, so at full strength "
-                             + "its edges cut straight under the type. Zero is no picture.")
-
-                SliderRow(label: "window transparency",
-                          value: transparency,
-                          range: transparencyRange,
-                          // Five points of the number beside it per press, and
-                          // one point per click: the arrows are for choosing,
-                          // the track is for landing.
-                          step: 0.05,
-                          grain: 0.01,
-                          readout: "\(Int((transparency * 100).rounded()))%") { shown in
-                    settings.groundOpacity = 1 - shown
-                }
-                SettingsNote(settings.backdrop > 0
-                             ? "how much of the picture and the desktop shows through"
-                             : "how much of the desktop shows through the window")
-
-                // Directly under the wash, because they are the same surface
-                // read two ways: this one is what colour it is, the one above is
-                // how much of it there is. Rebuilt from the name rather than
-                // cast, like the archive row -- and nil-checked, so a name this
-                // build has no family for does nothing instead of silently
-                // choosing the first one.
-                ChoiceRow(label: "ground",
-                          value: settings.ground.label,
-                          options: GroundFamily.labels) { picked in
-                    if let family = GroundFamily.named(picked) {
-                        settings.groundFamily = family.rawValue
-                    }
-                }
-                SettingsNote("the color under everything · ink and accents stay put")
 
                 // The masthead's slot, and then its width, in that order: what
                 // is in it decides whether the size row means anything, and the
                 // picture row only exists for one of the five answers.
-                ChoiceRow(label: "masthead art",
+                ChoiceRow(label: "Overview artwork",
                           value: settings.masthead.label,
                           options: MastheadArt.labels) { picked in
                     if let art = MastheadArt.named(picked) {
                         settings.mastheadArt = art.rawValue
                     }
                 }
-                SettingsNote("What stands beside the identity block at the top of Overview. "
-                             + "The globe and the orb turn, and both stop dead under Reduce "
-                             + "Motion; the sphere is a still dither plate; image is one of "
-                             + "your own, drawn plain. None leaves the identity block standing "
-                             + "on its own, which is what the masthead already does on a "
-                             + "window under 720, whichever art is chosen.")
+                SettingsNote("Wide Overview windows can show artwork beside the host name. Reduce Motion pauses the globe and orb.")
 
-                SliderRow(label: "art size",
+                SliderRow(label: "Artwork width",
                           value: Double(settings.mastheadCols),
                           range: colRange,
                           // Two cells a press and two cells a click. One would
@@ -576,10 +549,9 @@ struct SettingsView: View {
                           readout: "\(settings.mastheadCols) cols") { shown in
                     settings.mastheadCols = Int(shown.rounded())
                 }
-                SettingsNote("columns of the ascii art · sets image width on the same scale")
 
                 if settings.masthead == .image {
-                    ActionRow(label: "choose image", title: "pick", act: pick)
+                    ActionRow(label: "Custom image", title: "Choose…", act: pick)
                     SettingsNote(pictureNote)
                 }
             }
@@ -592,15 +564,12 @@ struct SettingsView: View {
     private var pictureNote: String {
         if let pickFault { return pickFault }
         guard let name = settings.mastheadImageFile, !name.isEmpty else {
-            return "Nothing picked yet, so the globe is standing in. Whatever you choose is "
-                + "copied into this app's own storage, which is why moving or deleting the "
-                + "original afterwards changes nothing up there."
+            return "The globe appears until you choose an image. Charon saves a local copy."
         }
         if MastheadImage.stamp(name).isEmpty {
-            return "\(name): not there any more, so the globe is standing in until you pick "
-                + "another."
+            return "Charon could not find “\(name)”. Choose another image to replace the globe."
         }
-        return "\(name): the copy in this app's own storage, not the file you picked."
+        return "Using a local copy of “\(name)”."
     }
 
     /// The one entitled act in this feature, and it is the user performing it:
@@ -626,30 +595,15 @@ struct SettingsView: View {
     // MARK: - this Mac
 
     private var machine: some View {
-        Panel(title: "This Mac", meta: AnyView(meta("on this device"))) {
-            VStack(alignment: .leading, spacing: 0) {
-                DotLeader(label: "where these are saved", value: "this mac",
-                          labelInk: HT.inkBright)
-                SettingsNote("Appearance and Demo preferences are saved on this Mac. Live feature switches are saved on the connected Pi and apply to every connected Mac. The collector token is stored in Keychain.")
-            }
+        Panel(title: "This Mac") {
+            SettingsNote("This Mac stores appearance and demo preferences. Keychain holds the collector token. Live feature switches apply to every Mac connected to the Pi.")
         }
     }
 
-    private func meta(_ text: String) -> some View {
-        Text(text).font(FocusInk.body).foregroundStyle(HT.inkDim).lineLimit(1)
-    }
 }
 
 // MARK: - the rows
 
-/* A setting, as one line: what it is called, then the word it is set to.
-   The word is the whole control and both channels at once -- ON is bright, OFF
-   is dim, and either reads correctly printed in one bit.
-
-   Rows WRAP rather than ellipsize: a setting whose name is cut in half is a
-   setting nobody can decide about, and the note under it is already a paragraph
-   -- one more wrapped line costs nothing this page has.
-*/
 private struct ToggleRow: View {
     var label: String
     var on: Bool
@@ -661,25 +615,20 @@ private struct ToggleRow: View {
                 .font(FocusInk.body)
                 .foregroundStyle(FocusInk.text)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityHidden(true)
 
             Spacer(minLength: 8)
 
             Toggle(label, isOn: Binding(get: { on }, set: { if $0 != on { flip() } }))
-                .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
                 .tint(FocusInk.sand)
         }
         .frame(minHeight: 28)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(label))
-        .accessibilityValue(Text(on ? "on" : "off"))
     }
 }
 
-/// A setting with more than two answers, on the same line and in the same
-/// place: the value slot of a leader, where every other reading on this page
-/// already is. Quiet, because the panel is the frame and a second bordered box
-/// inside it draws the control twice; caps, because it stands where ON and OFF
-/// stand and a lowercase answer beside them would read as prose.
 private struct ChoiceRow: View {
     var label: String
     var value: String
@@ -704,13 +653,6 @@ private struct ChoiceRow: View {
     }
 }
 
-/// A setting whose answer is somewhere else: the value slot holds the way to go
-/// and get it rather than the thing itself.
-///
-/// The same ghost button `ToggleRow` puts ON and OFF in, for the same reason --
-/// the row is already inside a panel, and a bordered control in the value slot
-/// would draw the frame twice. What was picked is reported by the note under
-/// the row, because a filename is longer than a value slot and wraps like prose.
 private struct ActionRow: View {
     var label: String
     var title: String
@@ -775,20 +717,13 @@ private struct SettingsNote: View {
     init(_ text: String) { self.text = text }
 
     var body: some View {
-        // Ink + measure (user's pick from the design review, 2026-08-20): the
-        // note is indented one label-step and capped at 68 cells, so the prose
-        // reads as an aside under a bright label instead of a wall the width
-        // of the window. The cap is characters, not a fraction: readability is
-        // about line length, and 68 cells is 68 cells at every window size.
         Text(text)
-            .font(FocusInk.body)
-            .foregroundStyle(HT.inkDim)
-            .lineSpacing(3)
+            .font(.callout)
+            .foregroundStyle(HT.inkMid)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: HT.cw * 68, alignment: .leading)
+            .frame(maxWidth: 540, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, HT.s1)
-            .padding(.bottom, HT.cw3)
+            .padding(.bottom, 8)
     }
 }
 

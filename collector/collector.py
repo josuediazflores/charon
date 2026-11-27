@@ -28,6 +28,10 @@ Run:  python3 collector.py serve
 
 from feature_control import FEATURES, FeatureControl, admit, feature_access
 import jarvis_runs
+import jarvis_intake
+import jarvis_brief_audio
+from pathlib import Path
+import jarvis_schedule
 
 import argparse
 import hashlib
@@ -4194,8 +4198,14 @@ class Collector:
 
     def run(self):
         last_save = 0.0
+        next_scheduled_check = 0.0
         while not self.stop.is_set():
             now = time.monotonic()
+            if now >= next_scheduled_check:
+                with admit("jarvis") as allowed:
+                    if allowed:
+                        jarvis_schedule.promote_due(self.jarvis_dir())
+                next_scheduled_check = now + 10
             for name, src in self.sources.items():
                 if now >= src.next_at:
                     with admit(name) as allowed:
@@ -6104,8 +6114,12 @@ class Collector:
                 "status": "idle",
                 "error": None,
             }
-            if not write_atomic(jpath, json.dumps(job, indent=2)):
-                return None, "cannot write the job", 500
+            try:
+                job_path = Path(jpath)
+                job_path.parent.mkdir(parents=True, exist_ok=True)
+                jarvis_intake.atomic_json(job_path, job, exclusive=True)
+            except OSError:
+                return None, "cannot create the job record", 500
 
             doc["turns"].append(self.jarvis_card(job, now))
             doc["updated_at"] = now
@@ -6127,6 +6141,33 @@ class Collector:
                 # exactly what happened.
                 return None, f"cannot queue the job: {exc.strerror or exc}", 500
             return jid, None, None
+
+    def jarvis_intake(self, body, operation="intake"):
+        try:
+            if not isinstance(body, dict):
+                raise ValueError("Expected a JSON object")
+            root = self.jarvis_dir()
+            if not root:
+                return None, "chat.base_dir is unset", 503
+            with self._jarvis_lock:
+                if operation == "confirm":
+                    jid = body.get("id")
+                    if not isinstance(jid, str) or not jarvis_runs.JOB_ID.fullmatch(jid):
+                        raise ValueError("Invalid plan ID")
+                    jid = jarvis_intake.confirm_review(root, jid, body)
+                elif operation == "process":
+                    key, text = jarvis_intake.parse_description(body, preserve_markdown=True)
+                    jid = jarvis_intake.file_once(root, "draft-" + key, "Brain Dump", text, None, review=True)
+                else:
+                    key, text, run_at = jarvis_intake.parse_request(body)
+                    jid = jarvis_intake.file_once(root, key, jarvis_intake.TITLE, text, run_at)
+            return jid, None, None
+        except jarvis_intake.RequestConflict as exc:
+            return None, str(exc), 409
+        except ValueError as exc:
+            return None, str(exc), 400
+        except OSError:
+            return None, "Could not file the overnight plan. Retry the same request.", 500
 
     def jarvis_job_stop(self, jid):
         """Ask the job runner to abandon one job. Returns (True, None, None) or
@@ -9584,11 +9625,25 @@ def make_handler(collector, token):
             if found:
                 return self._chat_action(found.group(1), found.group(2))
 
+            match = re.fullmatch(r"/v1/jarvis/brief/([0-9]{4}-[0-9]{2}-[0-9]{2})/audio", path)
+            if match:
+                return self._jarvis_brief_audio(match.group(1))
+
             if path == JARVIS_TTS_ROUTE:
                 return self._jarvis_tts()
 
             if path == JARVIS_TTS_WARM_ROUTE:
                 return self._jarvis_tts_warm()
+
+            if path in ("/v1/jarvis/intake", "/v1/jarvis/intake/process", "/v1/jarvis/intake/confirm"):
+                # An escaped non-BMP character takes 12 bytes in a JSON string.
+                operation = path.rsplit("/", 1)[-1]
+                limit = (jarvis_intake.MAX_TASKS * 8100 if operation == "confirm" else jarvis_intake.MAX_INPUT)
+                doc, why = self._read_body(limit * 12 + 4096)
+                if why:
+                    return self._json(400, {"error": why})
+                jid, why, code = collector.jarvis_intake(doc, operation)
+                return self._json(code or 202, {"error": why} if why else {"id": jid})
 
             if path in JARVIS_POST_ROUTES:
                 return self._jarvis(path)
@@ -9874,6 +9929,26 @@ def make_handler(collector, token):
             if not ok:
                 return self._json(code or 500, {"error": why})
             return self._no_content()
+
+        def _jarvis_brief_audio(self, day):
+            doc, why = self._read_body(256)
+            digest = doc.get("transcript_sha256") if isinstance(doc, dict) else None
+            if why or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+                return self._json(400, {"error": "A valid transcript_sha256 is required."})
+            root = collector.jarvis_dir()
+            if not root:
+                return self._json(503, {"error": "chat.base_dir is unset"})
+            try:
+                brief = jarvis_runs.daily_brief(root, collector.jarvis_job_is_queued, day)
+                if brief["unfinished_tasks"]:
+                    return self._json(409, {"error": "Waiting for overnight tasks to finish. Refresh the brief after they finish."})
+                audio = jarvis_brief_audio.recording(collector.state_dir, brief["spoken"], digest)
+            except jarvis_runs.RunError as exc:
+                return self._json(exc.code, {"error": str(exc)})
+            except OSError:
+                return self._json(500, {"error": "Could not read the brief or save its recording."})
+            self._headers(200, "audio/wav", len(audio), {"Cache-Control": "no-store"})
+            self.wfile.write(audio)
 
         def _jarvis_tts(self):
             """POST /v1/jarvis/tts -- one sentence in, one WAV back.
@@ -10412,6 +10487,20 @@ def make_handler(collector, token):
 
             if path == JARVIS_JOBS_ROUTE:
                 return self._json(200, {"jobs": collector.jarvis_jobs()})
+
+            if path.startswith("/v1/jarvis/brief/"):
+                root = collector.jarvis_dir()
+                if not root:
+                    return self._json(503, {"error": "chat.base_dir is unset"})
+                try:
+                    brief = jarvis_runs.daily_brief(root, collector.jarvis_job_is_queued,
+                                                    path.removeprefix("/v1/jarvis/brief/"),
+                                                    persist=self.headers.get("X-Charon-Read-Only") != "1")
+                except jarvis_runs.RunError as exc:
+                    return self._json(exc.code, {"error": str(exc)})
+                except OSError:
+                    return self._json(500, {"error": "Cannot read or save the daily brief."})
+                return self._json(200, brief)
 
             if path == JARVIS_RUNS_ROUTE or path.startswith(JARVIS_RUNS_ROUTE + "/"):
                 return self._jarvis_runs(path, query)

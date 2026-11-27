@@ -7,7 +7,7 @@ struct PageHead: View {
     /// Controls that apply to the whole view.
     var actions: AnyView? = nil
 
-    var titleSize: CGFloat = 38
+    var titleSize: CGFloat = 28
 
     @State private var boxWidth: CGFloat = 0
 
@@ -17,7 +17,7 @@ struct PageHead: View {
         let text = VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(FocusInk.heading(narrow ? min(31, titleSize) : titleSize))
-                .tracking(-1)
+                .tracking(-0.5)
                 .foregroundStyle(FocusInk.text)
                 .lineLimit(1)
                 .truncationMode(.tail)

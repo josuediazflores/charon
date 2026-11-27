@@ -82,8 +82,7 @@ struct MailTabView: View {
                 // in the reader: every draft in this system is a draft until he
                 // clicks SEND himself, and nothing on the Pi may click it for
                 // him.
-                Text("triage and drafts are written by a session that cannot send · "
-                     + "a reply leaves only when you click SEND")
+                Label("Only you can confirm and send a reply.", systemImage: "lock")
                     .font(Face.body)
                     .foregroundStyle(M.inkDim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -94,8 +93,7 @@ struct MailTabView: View {
             }
             .environment(\.mailFootHeight, footHeight)
         }
-        // The window's own backdrop is the ground; the tab hands it through.
-        .background(Color.clear)
+        .background(Ground.shared.glass ? HT.surface2 : Color.clear)
         .focusable()
         .focusEffectDisabled()
         .focused($keyboardHeld)
@@ -118,9 +116,7 @@ struct MailTabView: View {
         let inbox = model.counts?.inbox
 
         return HStack(spacing: 10) {
-            Icon(name: .mail, size: 17).foregroundStyle(M.inkMid)
-
-            Text("Email")
+            Text("Mail")
                 .font(Face.title)
                 .tracking(0.22)
                 .foregroundStyle(M.inkBright)
@@ -201,7 +197,7 @@ struct MailTabView: View {
                 EmptyPane(glyph: .mailOpen,
                           line: model.messages.isEmpty
                               ? "Nothing to read yet" : "Select a message",
-                          why: model.messages.isEmpty ? nil : "j and k walk the inbox")
+                          why: model.messages.isEmpty ? nil : "Use J and K to move through the inbox.")
                 Spacer(minLength: 0)
             }
         }

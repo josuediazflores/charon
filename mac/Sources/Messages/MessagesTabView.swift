@@ -129,7 +129,7 @@ struct MessagesTabView: View {
                 foot
             }
         }
-        .background(Color.clear)
+        .background(Ground.shared.glass ? HT.surface2 : Color.clear)
         .focusable()
         .focusEffectDisabled()
         .focused($keyboardHeld)
@@ -148,8 +148,6 @@ struct MessagesTabView: View {
 
     private func appBar(split: Bool) -> some View {
         HStack(spacing: 10) {
-            Icon(name: .messages, size: 17).foregroundStyle(M.inkMid)
-
             Text("Messages")
                 .font(Face.title)
                 .tracking(0.22)
@@ -222,7 +220,7 @@ struct MessagesTabView: View {
 
         return HStack(spacing: 0) {
             Text("\(allowlisted) chat\(allowlisted == 1 ? "" : "s") allowlisted · "
-                 + "sends need your click · bridge ")
+                 + "confirm each send · bridge ")
                 .foregroundStyle(M.inkDim)
             Text(reporting ? "live" : "absent")
                 .foregroundStyle(reporting ? M.accent : M.caution)

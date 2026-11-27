@@ -59,7 +59,7 @@ private struct OverviewPage<Content: View>: View {
     private var toolbar: some View {
         HStack(spacing: HT.cw) {
             Text("Overview")
-                .font(FocusInk.heading(38)).tracking(-1)
+                .font(FocusInk.heading(28)).tracking(-0.5)
                 .foregroundStyle(FocusInk.text)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)

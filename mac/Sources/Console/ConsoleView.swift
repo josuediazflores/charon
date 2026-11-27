@@ -81,7 +81,7 @@ struct ConsoleView: View {
                 CustomWidgetView(spec: spec, isEditing: isEditing, isDemo: isDemo)
             }
         case .identity: identity
-        case .date: PageHead(title: Fmt.longDate(now), subtitle: subtitle, titleSize: 30)
+        case .date: PageHead(title: Fmt.longDate(now), subtitle: subtitle, titleSize: 18)
         case .pihole: piholeCell
         case .nodes: nodesCell
         case .stillness: stillnessCell

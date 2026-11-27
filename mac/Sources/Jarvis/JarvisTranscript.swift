@@ -192,7 +192,7 @@ struct JarvisJobCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.vertical, HT.s1)
+        .padding(.vertical, 9)
         .padding(.horizontal, HT.cw2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(HT.surface2)
@@ -206,9 +206,9 @@ struct JarvisJobCard: View {
     private var head: some View {
         HStack(alignment: .firstTextBaseline, spacing: HT.cw) {
             // What it is before it says anything about itself.
-            Text("job").font(HT.body).foregroundStyle(HT.inkMid)
-            Text(turn.title.isEmpty ? "untitled job" : turn.title)
-                .font(HT.body)
+            Image(systemName: "briefcase").foregroundStyle(HT.inkMid).accessibilityLabel("Job")
+            Text(turn.title.isEmpty ? "Untitled job" : turn.title)
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(HT.inkBright)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -271,8 +271,8 @@ struct JarvisJobCard: View {
             // they are one thing to a reader waiting on them, and the words are
             // what tell them apart.
             Text(state == .queued
-                 ? "filed · its runner has not picked it up yet"
-                 : "running on the pi · the conversation is not waiting for it")
+                 ? "Waiting for the Pi to start this job."
+                 : "Running in the background on the Pi.")
                 .font(HT.body)
                 .foregroundStyle(HT.inkMid)
                 .fixedSize(horizontal: false, vertical: true)
@@ -373,18 +373,11 @@ struct JarvisFoldLine: View {
 /// The in-flight turn: whatever has been said so far, with a cursor on the end.
 struct JarvisStreaming: View {
     var partial: String
-    var queued: Bool
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: HT.cw) {
-                StatusPill(text: queued ? "~queued" : "~running", tone: .caution, glyph: false)
-                Text(queued ? "filed · waiting for the runner" : "answering")
-                    .font(HT.body)
-                    .foregroundStyle(HT.inkMid)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Jarvis")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(HT.inkMid)
             StreamingBody(text: partial)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -485,7 +478,7 @@ struct JarvisTranscript: View {
             if let sending { JarvisAskTurn(text: sending, at: nil) }
 
             if live {
-                JarvisStreaming(partial: doc?.partial ?? "", queued: doc?.queued ?? false)
+                JarvisStreaming(partial: doc?.partial ?? "")
             }
 
             // The runner's own reason, in the transcript rather than in a banner:

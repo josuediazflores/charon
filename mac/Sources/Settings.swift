@@ -158,15 +158,25 @@ final class ConsoleSettings {
     /// The floor and ceiling on that wash.
     static let groundRange: ClosedRange<Double> = 0.50...1.00
 
+    static let glassTransparencyRange = 0.00...0.95
+
+    static let glassBlurRange = 0.0...1.0
+
+    var glassBlur: Double {
+        didSet { UserDefaults.standard.set(glassBlur, forKey: "glassBlur") }
+    }
+
+    var glassTransparency: Double {
+        didSet { UserDefaults.standard.set(glassTransparency, forKey: "glassTransparency") }
+    }
+
     /// Which ground family the wash, the surfaces and the rules come out of,
     /// as a `GroundFamily` raw value. Held as a string rather than as the enum
     /// because that is what goes in and comes out of `UserDefaults`, and a
     /// preference written by an older -- or a newer -- build has to be readable
     /// as whatever it happens to say.
     ///
-    /// The `didSet` is the only writer of the token cache in the whole app. The
-    /// repaint is not here: this object knows what the ground is, and the shell
-    /// is the only thing that knows what is currently drawn on it.
+    /// The shared palette notifies the views that read its colors.
     var groundFamily: String {
         didSet {
             UserDefaults.standard.set(groundFamily, forKey: "groundFamily")
@@ -186,11 +196,6 @@ final class ConsoleSettings {
     /// `groundFamily` is: that is what goes in and comes out of `UserDefaults`,
     /// and a preference written by an older -- or a newer -- build has to be
     /// readable as whatever it happens to say.
-    ///
-    /// **No repaint here.** The ground's `didSet` has to prime a token cache
-    /// nothing observes; this is read straight out of the object by the view
-    /// that draws the slot, so ordinary observation carries it and there is
-    /// nothing to bump.
     var mastheadArt: String {
         didSet { UserDefaults.standard.set(mastheadArt, forKey: "mastheadArt") }
     }
@@ -249,6 +254,9 @@ final class ConsoleSettings {
         scanlines = ConsoleSettings.flag("scanlines", default: false)
         backdrop = ConsoleSettings.level("backdrop", default: 0,
                                          in: ConsoleSettings.backdropRange)
+        glassBlur = ConsoleSettings.level("glassBlur", default: 1, in: ConsoleSettings.glassBlurRange)
+        glassTransparency = ConsoleSettings.level("glassTransparency", default: 0.48,
+                                                  in: ConsoleSettings.glassTransparencyRange)
         groundOpacity = ConsoleSettings.wash("groundOpacity", default: HT.groundOpacity)
         // Validated by the same reader the token cache initialises itself from,
         // so the two cannot disagree about what this Mac chose -- and a raw

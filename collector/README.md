@@ -107,9 +107,10 @@ Use the actual service account and unit names. For example:
 ```sh
 sudo python3 install-feature-control.py --user pi --feature chat \
   --pair halftone-chat.path:halftone-chat.service
-sudo python3 install-feature-control.py --user pi --feature jarvis \
+sudo python3 install-feature-control.py --user pi --feature jarvis --extend-pairs \
   --pair halftone-jarvis-say.path:halftone-jarvis-say.service \
-  --pair halftone-jarvis-job.path:halftone-jarvis-job.service
+  --pair halftone-jarvis-job.path:halftone-jarvis-job.service \
+  --pair halftone-jarvis-intake.path:halftone-jarvis-intake.service
 ```
 
 For Mail, register the poll timer, triage path and actions path with their workers. Include a dedicated inbound daemon with `--service mail-ingest.service` if installed and owned by this feature. For Messages, register the triage path and worker and pass `--bridge HOST` for each Mac Bridge, using its reported hostname. Specify `--no-bridge` when there are none. Specify `--no-jobs` when a feature has no local systemd work. Update the collector before updating the Bridge. A Bridge with no control response suspends feature work until the Pi answers.

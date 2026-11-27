@@ -6,7 +6,7 @@ struct OvernightTasksView: View {
     let model: MailModel
 
     var body: some View {
-        OvernightRunList(store: model.store)
+        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL)
             .id(ObjectIdentifier(model.store))
     }
 }
@@ -18,8 +18,10 @@ private struct PageRequest: Equatable {
 
 private struct OvernightRunList: View {
     let store: ConsoleStore
+    let draftScope: String
     @State private var runs: [OvernightRun] = []
-    @State private var selected: OvernightRun?
+    @State private var composing = false
+    @State private var route: [OvernightRun] = []
     @State private var cursor: String?
     @State private var query = PageRequest()
     @State private var loading = true
@@ -28,20 +30,40 @@ private struct OvernightRunList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let selected {
-                RunReader(store: store, summary: selected, legacy: legacy) { self.selected = nil }
+            if composing {
+                OvernightIntakeView(store: store, scope: draftScope, back: { composing = false }) { plan in
+                    composing = false
+                    route = [plan]
+                }
+            } else if let selected = route.last, selected.kind == "brain_dump", selected.status != "done" {
+                BrainDumpReview(store: store, scope: draftScope, plan: selected, back: {
+                    route.removeLast()
+                    query = PageRequest()
+                }, confirmed: { _ in route = []; query = PageRequest() })
+                .id(selected.id)
+            } else if let selected = route.last {
+                RunReader(store: store, summary: selected, legacy: legacy,
+                          backTitle: route.dropLast().last?.name ?? "Overnight tasks",
+                          openChild: { route.append($0) }) {
+                    route.removeLast()
+                    if route.isEmpty { query = PageRequest() }
+                }
                     .id(selected.id)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         HStack {
-                            Text("Overnight tasks").font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
+                            Text("Overnight tasks").font(FocusInk.heading(28)).foregroundStyle(FocusInk.text)
                             Spacer()
+                            Button { composing = true } label: {
+                                Label("Set overnight tasks", systemImage: "plus")
+                            }
+                            .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
                             Button { query = PageRequest() } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel("Refresh overnight tasks").disabled(loading)
                         }
                         if legacy {
-                            Text("Recent job records from the Pi. The older collector provides result excerpts and web links.")
+                            Text("This collector provides excerpts and source links.")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         if let error {
@@ -49,28 +71,40 @@ private struct OvernightRunList: View {
                             Button("Try again") { query = PageRequest(before: query.before) }
                         }
                         if runs.isEmpty && !loading && error == nil {
-                            Text("No overnight tasks yet.").foregroundStyle(.secondary)
+                            ContentUnavailableView("No overnight tasks", systemImage: "moon",
+                                description: Text("Choose Set overnight tasks to plan your first run."))
                         }
-                        ForEach(runs) { run in
-                            Button { selected = run } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(run.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(FocusInk.text)
-                                    Text([run.statusLabel, dateLabel(run.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                        .font(.callout).foregroundStyle(.secondary)
+                        if !runs.isEmpty {
+                            VStack(spacing: 0) {
+                                ForEach(runs) { run in
+                                    Button { route = [run] } label: {
+                                        HStack(spacing: 12) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(run.name).font(.system(size: 14, weight: .medium))
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                                Text(dateLabel(run.listTimestamp)).font(.caption).foregroundStyle(HT.inkMid)
+                                            }
+                                            Spacer()
+                                            Text(run.statusLabel).font(.callout)
+                                                .foregroundStyle(run.status == "error" ? HT.fault : HT.inkMid)
+                                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(HT.inkDim)
+                                        }
+                                        .padding(.vertical, 12)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    if run.id != runs.last?.id { Divider() }
                                 }
-                                .padding(16)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .focusCard().contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .glassReadingPane(inset: 12)
                         }
                         if loading { ProgressView().controlSize(.small).accessibilityLabel("Loading overnight tasks") }
                         if let cursor, !loading, error == nil {
                             Button("Show earlier tasks") { query = PageRequest(before: cursor) }
                         }
                     }
-                    .frame(maxWidth: 690, alignment: .leading).padding(32)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: 820, alignment: .leading).padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -98,6 +132,10 @@ private func dateLabel(_ raw: String) -> String {
     Fmt.date(raw)?.formatted(date: .abbreviated, time: .shortened) ?? raw
 }
 
+private func statusLine(_ run: OvernightRun) -> String {
+    [run.statusLabel, dateLabel(run.listTimestamp)].filter { !$0.isEmpty }.joined(separator: " · ")
+}
+
 private struct RunColumn<Content: View>: View {
     @ViewBuilder let content: (ScrollViewProxy) -> Content
 
@@ -116,11 +154,14 @@ private struct RunReader: View {
     let store: ConsoleStore
     let summary: OvernightRun
     let legacy: Bool
+    let backTitle: String
+    let openChild: (OvernightRun) -> Void
     let back: () -> Void
     @State private var report: OvernightRun?
     @State private var error: String?
     @State private var request = UUID()
     @State private var attachments: [RunFileLocation] = []
+    @State private var stopping = false
 
     var body: some View {
         if let report, let current = attachments.last {
@@ -130,17 +171,44 @@ private struct RunReader: View {
                 .id(current)
         } else {
             RunColumn { scroll in
-                Button(action: back) { Label("Overnight tasks", systemImage: "arrow.left") }
+                Button(action: back) { Label(backTitle, systemImage: "arrow.left") }
+                    .accessibilityLabel("Back to " + backTitle.lowercased())
                     .buttonStyle(.plain).foregroundStyle(.secondary)
-                Text(summary.name).font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
+                Text(summary.name).font(FocusInk.heading(28)).foregroundStyle(FocusInk.text)
                 if let report {
-                    Text([report.statusLabel, dateLabel(report.updatedAt)].filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text(statusLine(report))
                         .font(.callout).foregroundStyle(.secondary)
+                    if report.isPlanning, let start = report.runAt {
+                        Text("Tasks start \(dateLabel(start))").foregroundStyle(.secondary)
+                    }
+                    if report.status == "scheduled", report.parentId != nil {
+                        Button(stopping ? "Stopping…" : "Stop scheduled task") {
+                            Task { await stopScheduledTask() }
+                        }
+                        .disabled(stopping)
+                    }
                     if let message = report.error, !message.isEmpty { Text(message).textSelection(.enabled) }
                     if let markdown = report.markdown, !markdown.isEmpty {
                         RunMarkdown(markdown: markdown, run: report, scroll: scroll, follow: { attachments.append($0) })
-                    } else {
+                    } else if report.isPlanning && report.active {
+                        Text("Jarvis is preparing your tasks.").foregroundStyle(.secondary)
+                    } else if report.kind != "brain_dump" && report.status != "scheduled" && report.status != "stopped" {
                         Text("This run has no saved report yet.").foregroundStyle(.secondary)
+                    }
+                    if let children = report.children, !children.isEmpty {
+                        Text("Tasks").font(.title2.weight(.semibold))
+                        ForEach(children) { child in
+                            Button { openChild(child) } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(child.name).font(.headline)
+                                        Text(statusLine(child)).font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }.padding(12).focusCard().contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
                     }
                     if let prompt = report.request, !prompt.isEmpty {
                         DisclosureGroup("Original request") { Text(prompt).textSelection(.enabled) }
@@ -168,28 +236,50 @@ private struct RunReader: View {
                         Text("This collector supplies the saved job excerpt. Run files require the run reader on the Pi.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
-                } else if let error {
+                } else if error == nil {
+                    ProgressView().controlSize(.small)
+                }
+                if let error {
                     Text(error).foregroundStyle(.secondary)
                     Button("Try again") { request = UUID() }
-                } else {
-                    ProgressView().controlSize(.small)
                 }
             }
             .task(id: request) {
-                // On returning from a linked file, keep the report and its manifest together.
-                if report != nil { return }
                 error = nil
                 do {
-                    let value: OvernightRun?
-                    if summary.fromJobList { value = summary }
-                    else { value = try await store.overnightRun(id: summary.id) }
-                    try Task.checkCancellation()
-                    guard let value else { error = "This run is no longer available on the Pi."; return }
-                    report = value
+                    while !Task.isCancelled {
+                        let value: OvernightRun?
+                        if summary.fromJobList { value = summary }
+                        else { value = try await store.overnightRun(id: summary.id) }
+                        try Task.checkCancellation()
+                        guard let value else { error = "This run is no longer available on the Pi."; return }
+                        report = value
+                        guard !summary.fromJobList else { return }
+                        let related = [value] + (value.children ?? [])
+                        let delay: TimeInterval
+                        if related.contains(where: \.active) {
+                            delay = 3
+                        } else if let start = related.filter({ $0.status == "scheduled" })
+                            .compactMap({ Fmt.date($0.runAt) }).min() {
+                            delay = max(3, min(60, start.timeIntervalSinceNow))
+                        } else { return }
+                        try await Task.sleep(for: .seconds(delay))
+                    }
                 } catch {
                     if !Task.isCancelled { self.error = error.localizedDescription }
                 }
             }
+        }
+    }
+
+    private func stopScheduledTask() async {
+        guard !stopping else { return }
+        stopping = true
+        defer { stopping = false }
+        if case .ok = await store.jarvisJobStop(id: summary.id) {
+            request = UUID()
+        } else {
+            error = "Couldn’t stop this task. Check your connection and try again."
         }
     }
 }
@@ -215,7 +305,7 @@ private struct RunFileReader: View {
         RunColumn { scroll in
             Button(action: back) { Label("Back", systemImage: "arrow.left") }.buttonStyle(.plain)
             Text(location.file.label.isEmpty ? location.file.name : location.file.label)
-                .font(FocusInk.heading(38)).foregroundStyle(FocusInk.text)
+                .font(FocusInk.heading(28)).foregroundStyle(FocusInk.text)
             if let markdown {
                 RunMarkdown(markdown: markdown, run: run, scroll: scroll, location: location, follow: follow)
             } else if let localFile {

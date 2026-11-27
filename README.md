@@ -36,9 +36,10 @@ on a wire format, and you can run any one of them without the other two.
 
 ## The console
 
-The Focus layout uses a solid graphite background, serif headings and a
-collapsible sidebar. Use `⌘1` through `⌘8` to switch between the main sections.
-The screenshots in this guide are from the public Mac app in Demo mode.
+Charon opens with a graphite background and a collapsible sidebar. To use
+the frosted backdrop, choose **Glass** under **Settings → Appearance**.
+Use **View → Go to Destination** (`⌘K`) to jump to a page or `⌘R` to refresh.
+The screenshots show an earlier public build in Demo mode.
 
 ### Overview
 
@@ -49,10 +50,9 @@ collector has its own. [Widget setup guide](mac/Resources/WidgetHelp/AGENTS.md).
 
 ### Jarvis
 
-Open **Jarvis → Conversation** for today's chat. On a fresh day, **Catch me up**
-prepares a question about overnight work, **Revisit a day** opens history, and
-**Hand off a task** switches the composer to a background job. You can also
-type your own question and send it.
+Open **Jarvis → Conversation** for today's chat. The particle sphere turns
+once every 24 seconds with fixed rings. **Review overnight work** prepares a
+question about recent tasks, and **History** opens earlier conversations.
 
 ![Jarvis Conversation with its amber orb, message composer and three starter actions](docs/screenshots/7-jarvis.png)
 
@@ -60,6 +60,12 @@ During a conversation, choose **As job** to hand longer work to the Pi while
 you continue chatting. **History** lets you read earlier days.
 
 Open **Jarvis → Overnight tasks** to see what is queued, running or finished.
+
+Choose **Set overnight tasks** to open **Brain Dump**. Type your notes or
+choose **Dictate** to use on-device speech recognition if it supports your
+language. Choose **Process**, review the proposed tasks, then choose a start
+time and select **Done**. In Demo, each line becomes an editable sample task.
+Live planning uses Codex on the collector.
 Select a run to read its result. With a collector that supports archived
 reports, you can follow sources, read Markdown notes, preview Word documents
 and PDFs, or select **Save a copy**. Older collectors show recent jobs and
@@ -155,17 +161,17 @@ different one. The mail triage unit deliberately loads `secrets/env` (the model
 provider's key) and never `secrets/mail-env` (the mailbox password), so the one
 process that starts a model cannot be handed the mailbox.
 
-**Model sessions run under default-deny allowlists.** There are three session
-environments, and the working directory is the wall:
+**Model access differs by surface.** Chat and Jarvis talk use Claude. Background
+research uses Codex CLI with the Pi operator’s ChatGPT sign-in.
 
 | Surface | Directory on the Pi | May |
 |---|---|---|
 | Chat tab | `halftone-chat/env/` | read, plus write its own memory store through `bin/memory` |
 | Jarvis talk | `halftone-chat/sayenv/` | the same, plus file background jobs through `bin/jarvis-job` |
-| Jarvis work | `halftone-chat/jobenv/` | read, `Write`/`Edit`/`Task`, web search and fetch. Memory is readable here and not writable |
+| Jarvis work | Temporary directory for each research job | Search the web and return Markdown and text files for the runner to archive |
 | Mail and messages triage | `charon-mail/mail-env/` | intended to be tool-less: an empty allow list and a deny on `Edit` over the tree |
 
-`defaultMode` is `dontAsk` everywhere, so anything not matched by an allow rule is
+`defaultMode` is `dontAsk` in the Claude environments, so anything not matched by an allow rule is
 refused rather than queued behind a dialog nobody will answer. `deny` beats
 `allow`, and the deny lists are the containment story: `.env` files, `~/.ssh`,
 `secrets/`, every `.claude/` directory, and the per-process `/proc` files that
@@ -473,18 +479,29 @@ format. No conversation is read until you allow it in the app.
 
 ### 6. Chat and Jarvis
 
-These are the model sessions that run on the Pi. Directories first, because
+Install the native Codex CLI on the Pi to use **As job** in Jarvis. Sign in once
+as the user that runs the service. The default executable is `~/.local/bin/codex`.
+See the [Codex CLI installation guide](https://developers.openai.com/codex/cli/).
+
+```sh
+install -d -m 0700 ~/.codex-jarvis
+CODEX_HOME="$HOME/.codex-jarvis" ~/.local/bin/codex login
+CODEX_HOME="$HOME/.codex-jarvis" ~/.local/bin/codex login status
+```
+
+Create the service directories first, because
 `ReadWritePaths=` fails on a path that is not there and a `.path` unit watching a
 missing directory sits inactive forever while looking healthy.
 
 ```sh
 mkdir -p ~/halftone-chat/{bin,memory,threads/.queue,threads/.stop}
-mkdir -p ~/halftone-chat/jarvis/{days,jobs,.say,.jobs,.stop,.jobstop}
+mkdir -p ~/halftone-chat/jarvis/{days,jobs,.say,.jobs,.stop,.jobstop,.intake-jobs,.scheduled}
 mkdir -p ~/halftone-chat/{env,sayenv,jobenv}/.claude
 
 cp collector/chat-runner.py       ~/halftone-chat/bin/
 cp collector/jarvis-say-runner.py ~/halftone-chat/bin/
 cp collector/jarvis-job-runner.py ~/halftone-chat/bin/
+cp collector/jarvis_intake.py     ~/halftone-chat/bin/
 cp collector/jarvis-job-file.py   ~/halftone-chat/bin/jarvis-job
 cp collector/memory-tool.py       ~/halftone-chat/bin/memory
 cp collector/memory-taint.py      ~/halftone-chat/bin/memory-taint
@@ -500,10 +517,16 @@ cp collector/jarvis-job-env/settings.json ~/halftone-chat/jobenv/.claude/
 sudo cp collector/halftone-chat.{service,path} /etc/systemd/system/
 sudo cp collector/halftone-jarvis-say.{service,path} /etc/systemd/system/
 sudo cp collector/halftone-jarvis-job.{service,path} /etc/systemd/system/
+sudo cp collector/halftone-jarvis-intake.{service,path} /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo python3 collector/install-feature-control.py --user pi --feature jarvis --extend-pairs \
+  --pair halftone-jarvis-say.path:halftone-jarvis-say.service \
+  --pair halftone-jarvis-job.path:halftone-jarvis-job.service \
+  --pair halftone-jarvis-intake.path:halftone-jarvis-intake.service
 sudo systemctl enable --now halftone-chat.path
 sudo systemctl enable --now halftone-jarvis-say.path
 sudo systemctl enable --now halftone-jarvis-job.path
+sudo systemctl enable --now halftone-jarvis-intake.path
 ```
 
 The three helpers are copied without their `.py` extension on purpose: the allow

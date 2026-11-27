@@ -97,7 +97,7 @@ struct CountsLine: View {
         // it does not have.
         let polled = lastPollAt.map { "polled \(Fmt.relTime($0)) ago" } ?? "never polled"
 
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        let totals = HStack(spacing: 6) {
             if let counts {
                 pair(counts.unread, "unread")
                 sep
@@ -106,11 +106,19 @@ struct CountsLine: View {
                 pair(counts.triagePending, "to triage")
                 sep
                 pair(counts.outboxQueued, "queued")
-                sep
             }
-            Text(polled).foregroundStyle(M.inkDim)
-            Spacer(minLength: 0)
         }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                totals
+                Text(polled).foregroundStyle(M.inkDim)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                totals
+                Text(polled).foregroundStyle(M.inkDim)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(Face.body)
         .lineLimit(1)
         .padding(.horizontal, 16)
@@ -233,7 +241,7 @@ struct MailRow: View {
     private var top: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(m.from)
-                .font(Face.body)
+                .font(.system(size: 13, weight: strong ? .semibold : .regular))
                 .foregroundStyle(fromInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -289,7 +297,7 @@ struct MailRow: View {
 
     private var subject: some View {
         Text(m.subject)
-            .font(Face.body)
+            .font(.system(size: 13))
             .foregroundStyle(subjectInk)
             .lineLimit(1)
             .truncationMode(.tail)

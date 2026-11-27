@@ -163,6 +163,7 @@ struct ChatConversationView: View {
             // The floor, not the height: it binds only on a short window, where
             // the page overflowing is a better answer than a four-row letterbox.
             .frame(minHeight: CGFloat(chatRows) * HT.row, maxHeight: .infinity)
+            .glassReadingPane(inset: 0)
             // This scrollport and nothing else's: no smooth behaviour anywhere
             // near it, because a terminal repaints, it does not animate.
             .onChange(of: painted) { _, _ in proxy.scrollTo("chat-end", anchor: .bottom) }

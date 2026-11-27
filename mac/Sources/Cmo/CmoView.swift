@@ -206,7 +206,7 @@ struct CmoView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: HT.row) {
-            PageHead(title: "Daily CMO", subtitle: subtitle)
+            PageHead(title: "Daily briefing", subtitle: subtitle)
             grid
             bottomBar
         }
@@ -638,7 +638,7 @@ struct CmoView: View {
                 }
                 Text(" · ").font(HT.body).foregroundStyle(HT.inkDim)
                 CmoQuietButton(text: "cancel") { leaveSelecting() }
-                Text(" · tap items and drafts to select")
+                Text(" · click items and drafts to select")
                     .font(HT.body).foregroundStyle(HT.inkDim)
             }
             Spacer(minLength: 0)

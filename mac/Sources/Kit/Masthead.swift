@@ -25,7 +25,7 @@ struct Masthead: View {
         HStack(spacing: 24) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("\(user)@\(host)")
-                    .font(FocusInk.heading(28))
+                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
                     .foregroundStyle(FocusInk.text)
                     .accessibilityAddTraits(.isHeader)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 16, alignment: .leading)],
@@ -47,9 +47,8 @@ struct Masthead: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if width > HT.bpSm, let art { art.fixedSize() }
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .focusCard()
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) { Divider() }
         .htMeasureWidth { width = $0 }
     }
 }
@@ -60,17 +59,13 @@ struct MastheadStrip: View {
     var signal: Bool = false
 
     var body: some View {
-        HStack(spacing: HT.cw2) {
-            CheckerBand(color: signal ? HT.signalDim : HT.inkFaint)
-            Text(legend.uppercased())
-                .font(HT.body)
-                .tracking(1)
-                .foregroundStyle(signal ? HT.signal : HT.inkBright)
-                .lineLimit(1)
-                .fixedSize()
-                .layoutPriority(1)
-            CheckerBand(color: signal ? HT.signalDim : HT.inkFaint)
+        HStack(spacing: 6) {
+            Image(systemName: signal ? "checkmark.circle" : "info.circle")
+            Text(legend)
+            Spacer()
         }
+        .font(.caption)
+        .foregroundStyle(HT.inkMid)
         .frame(height: HT.row)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(legend))

@@ -34,12 +34,6 @@ import SwiftUI
  * `HT.surface3`, `M.line` is `HT.lineFaint`. Both read this file, so a family
  * cannot come out consistent on the console pages and wrong in the reader, and
  * a ramp measured for legibility here cannot be legible on only one of them.
- *
- * **Read through a cache, written once.** The tokens are computed properties
- * over `Ground.current`, so a switch is one struct assignment rather than a walk
- * over every call site. What that does NOT buy is a repaint: a view that reads
- * `HT.surface3` has no dependency SwiftUI can see, which is why the shell
- * re-identifies its content on the family -- see the `.id` in ConsoleShellView.
  */
 
 /// One ground family, resolved. The wash, its three surfaces, its three rules
@@ -63,6 +57,21 @@ struct GroundPalette {
     let inkDim: Color
     let inkFaint: Color
 
+    // Black translucent surfaces retain the local wallpaper color underneath.
+    // Neutral white rules remain visible on both warm and cool backgrounds.
+    static let glass = GroundPalette(
+        void: Color(white: 0.085),
+        surface2: Color(white: 0.035).opacity(0.48),
+        surface3: Color(white: 0.06).opacity(0.56),
+        surface4: Color(white: 0.16).opacity(0.66),
+        lineFaint: Color.white.opacity(0.10),
+        line: Color.white.opacity(0.18),
+        lineBright: Color.white.opacity(0.30),
+        ink: Color(white: 0.97), inkMid: Color(white: 0.89),
+        inkDim: Color(white: 0.80), inkFaint: Color(white: 0.67))
+}
+
+extension GroundPalette {
     /// Written in hex, because that is how the design system writes them and a
     /// preset is easier to check against a stylesheet than against a decimal.
     init(void: UInt32, surface2: UInt32, surface3: UInt32, surface4: UInt32,
@@ -184,21 +193,23 @@ enum GroundFamily: String, CaseIterable, Identifiable {
     }
 }
 
-/// The family in force, and its palette, cached.
-///
-/// `nonisolated(unsafe)` and not a lock: this is written from exactly one place
-/// -- the settings object's `didSet`, on the main actor -- and read from view
-/// bodies and from `NSColor`, which are on the main actor too.
-enum Ground {
+/// Shared tokens observe appearance changes without replacing the view tree.
+@Observable
+final class Ground {
+    static let shared = Ground()
 
-    private(set) nonisolated(unsafe) static var family: GroundFamily = GroundFamily.stored
+    var glass = UserDefaults.standard.bool(forKey: "glassAppearance") {
+        didSet { UserDefaults.standard.set(glass, forKey: "glassAppearance") }
+    }
 
-    private(set) nonisolated(unsafe) static var current: GroundPalette = GroundFamily.stored.palette
+    private var selectedFamily = GroundFamily.stored
+    private var selectedPalette = GroundFamily.stored.palette
 
-    /// Switch the ground. Repainting what is already on screen is the shell's
-    /// job, not this function's -- see `ConsoleShellView`.
+    static var family: GroundFamily { shared.selectedFamily }
+    static var current: GroundPalette { shared.glass ? .glass : shared.selectedPalette }
+
     static func use(_ next: GroundFamily) {
-        family = next
-        current = next.palette
+        shared.selectedFamily = next
+        shared.selectedPalette = next.palette
     }
 }

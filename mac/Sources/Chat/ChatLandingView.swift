@@ -176,7 +176,7 @@ struct ChatLandingView: View {
 
     private var chipRow: some View {
         HStack(spacing: 12) {
-            Text("Chat").font(FocusInk.heading(36)).foregroundStyle(FocusInk.text)
+            Text("Chat").font(FocusInk.heading(28)).foregroundStyle(FocusInk.text)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             if showing { ChatSelectDoor(pick: pick, empty: mainRows.isEmpty) }
@@ -254,8 +254,7 @@ struct ChatLandingView: View {
     private var note: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
-            ChatNote("an assistant running on the pi · it reads this box and the web, "
-                     + "and changes nothing but its own memory", centred: true)
+            ChatNote("Chat can read the Pi and the web. Only its memory changes.", centred: true)
             Spacer(minLength: 0)
         }
     }

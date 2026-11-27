@@ -106,6 +106,8 @@ struct JarvisTabView: View {
     /// aloud.
     @State private var voiceBase = 0
 
+    private let conversationAccent = Color(white: 0.95)
+
     private var today: Bool { day == nil }
 
     private var live: Bool {
@@ -152,71 +154,49 @@ struct JarvisTabView: View {
         return f
     }()
 
-    private var focusPage: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                Image(systemName: "sparkle").foregroundStyle(HT.c11)
-                Text("Jarvis").foregroundStyle(FocusInk.secondary)
-                Text("/").foregroundStyle(FocusInk.line)
-                Text("Conversation")
-                Spacer()
-                if presence.word != "idle" {
-                    Text(presence.word.capitalized).foregroundStyle(presence.ink)
-                }
-                Button {
-                    historyOpen = true
-                } label: { Label("History", systemImage: "clock.arrow.circlepath") }
-                .foregroundStyle(FocusInk.secondary)
-                .accessibilityLabel("Conversation history")
-                .popover(isPresented: $historyOpen, arrowEdge: .bottom) { historyList }
-            }
-            .font(.system(size: 13))
-            .padding(.horizontal, 22)
-            .frame(height: 47)
-            Divider().overlay(FocusInk.line)
+    @Environment(\.workspaceScale) private var scale
 
+    private var focusPage: some View {
+        Group {
             if atStart {
-                GeometryReader { geometry in
-                    let size = geometry.size
-                    let compact = size.height < 440
+                GeometryReader { pane in
+                    let narrow = pane.size.width < 650
                     ScrollView {
-                        VStack(spacing: 0) {
-                            ZStack {
-                                FocusOrbits()
-                                orb(scale: compact ? 0.49 : 0.79)
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                dayHeading("Conversation", compact: false)
+                                    .layoutPriority(1)
+                                Spacer(minLength: 0)
+                                FocusHero()
+                                    .frame(width: min(pane.size.width * 0.32, 363 * scale),
+                                           height: (narrow ? 115 : 167) * scale)
+                                    .accessibilityHidden(true)
                             }
-                            .frame(maxWidth: 470)
-                            .frame(height: compact ? 72 : (size.height < 540 ? 106 : 140))
-                            dateText.padding(.top, compact ? 6 : 13)
-                            Text("What’s on your mind?")
-                                .font(FocusInk.heading(compact ? 34 : (size.width < 650 ? 39 : 56)))
-                                .tracking(-2)
-                                .minimumScaleFactor(0.7)
-                                .lineLimit(1)
-                                .padding(.top, 5)
-                                .padding(.bottom, compact ? 12 : 23)
-                            composer
-                            HStack(spacing: 9) {
-                                starter("Catch me up", "Review the overnight work.", "sunrise", compact: compact) {
-                                    if draft.isEmpty { draft = "Catch me up on the overnight work." }
+                            .padding(.leading, 8 * scale)
+                            composer(expanded: true)
+                                .padding(.top, (narrow ? 22 : 35) * scale)
+                            HStack {
+                                Button {
+                                    draft = "Catch me up on the overnight work."
                                     asJob = false
                                     focusToken += 1
-                                }
-                                starter("Revisit a day", "Open a past conversation.", "clock.arrow.circlepath", compact: compact) {
-                                    historyOpen = true
-                                }
-                                starter("Hand off a task", "Give Jarvis a background job.", "briefcase", compact: compact) {
-                                    asJob = true
-                                    focusToken += 1
-                                }
+                                } label: { shortcutLabel("Review overnight work", symbol: "sunrise") }
+                                .disabled(!draft.isEmpty)
+                                Spacer()
+                                historyButton
                             }
-                            .padding(.top, compact ? 8 : 13)
+                            .padding(.leading, 6 * scale)
+                            .font(.system(size: 21 * scale))
+                            .foregroundStyle(Color(white: 0.9))
+                            .padding(.top, (narrow ? 25 : 40) * scale)
                         }
-                        .frame(maxWidth: 760)
-                        .padding(.horizontal, size.width < 650 ? 22 : 34)
-                        .padding(.vertical, compact ? 8 : 20)
-                        .frame(maxWidth: .infinity, minHeight: size.height)
+                        .frame(maxWidth: 1066)
+                        .padding(.horizontal, narrow ? 22 : pane.size.width * 0.075)
+                        .padding(.top, max(14, pane.size.height * (narrow ? 0.13 : 0.169)))
+                        .padding(.bottom, 20)
+                        .frame(maxWidth: .infinity)
                     }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
             } else {
                 conversation
@@ -224,42 +204,38 @@ struct JarvisTabView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(FocusInk.text)
-        .background(FocusInk.ground)
     }
 
-    private func orb(scale: CGFloat) -> some View {
-        LiquidOrbView(activity: presence.activity, ink: presence.ink, label: "Jarvis is \(presence.word)")
-            .scaleEffect(scale)
-            .frame(width: 196 * scale, height: 198 * scale)
-    }
-
-    private var dateText: some View {
-        Text(dateLabel.uppercased())
-            .font(.custom("Departure Mono", size: 10)).tracking(1.1)
-            .foregroundStyle(FocusInk.sand)
-    }
-
-    private func starter(_ title: String, _ detail: String, _ symbol: String, compact: Bool,
-                         action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Image(systemName: symbol).foregroundStyle(FocusInk.sand)
-                    Spacer()
-                    Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(FocusInk.secondary)
-                }.padding(.bottom, compact ? 0 : 5)
-                Text(title).font(.system(size: 14, weight: .medium))
-                if !compact {
-                    Text(detail).font(.system(size: 12)).foregroundStyle(FocusInk.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+    private func dayHeading(_ title: String, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6 * scale) {
+            Text(title)
+                .font(.system(size: compact ? 25 : 48 * scale, weight: .bold))
+                .foregroundStyle(.white)
+                .accessibilityAddTraits(.isHeader)
+            Text(dateLabel)
+                .font(.system(size: compact ? 14 : 22 * scale))
+                .foregroundStyle(Ground.shared.glass ? HT.ink : Color(white: 0.76))
+            if today && presence.word != "idle" {
+                Text(presence.word.capitalized).font(.caption.weight(.medium))
+                    .foregroundStyle(presence.ink)
             }
-            .frame(maxWidth: .infinity, minHeight: compact ? 30 : 64, alignment: .topLeading)
-            .padding(compact ? 9 : 13)
-            .background(FocusInk.card, in: RoundedRectangle(cornerRadius: FocusInk.cardRadius))
-            .overlay { RoundedRectangle(cornerRadius: FocusInk.cardRadius).strokeBorder(FocusInk.line) }
-            .contentShape(Rectangle())
-        }.accessibilityLabel(title)
+        }
+    }
+
+    private func shortcutLabel(_ title: String, symbol: String) -> some View {
+        let glass = Ground.shared.glass
+        return Label(title, systemImage: symbol)
+            .padding(.horizontal, glass ? 11 * scale : 0)
+            .padding(.vertical, glass ? 6 * scale : 0)
+            .background(glass ? Color.black.opacity(0.36) : .clear, in: Capsule())
+    }
+
+    private var historyButton: some View {
+        Button { historyOpen = true } label: {
+            shortcutLabel("History", symbol: "clock").padding(.vertical, 4)
+        }
+        .accessibilityLabel("Conversation history")
+        .popover(isPresented: $historyOpen, arrowEdge: .bottom) { historyList }
     }
 
     private var historyList: some View {
@@ -316,12 +292,9 @@ struct JarvisTabView: View {
     private var conversation: some View {
         VStack(spacing: 0) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    dateText
-                    Text(today ? "Today’s conversation" : "Archived conversation")
-                        .font(.custom("Iowan Old Style", size: 32)).tracking(-1)
-                }
+                dayHeading(today ? "Conversation" : "Archived conversation", compact: true)
                 Spacer()
+                historyButton.font(FocusInk.body).foregroundStyle(FocusInk.secondary)
                 if !missing && !unreachable {
                     Button {
                         folded.toggle()
@@ -332,7 +305,10 @@ struct JarvisTabView: View {
                     .help(folded ? "Expand transcript" : "Collapse transcript")
                     .foregroundStyle(FocusInk.secondary)
                 }
-                orb(scale: 0.34)
+                FocusHero(activity: today ? presence.activity : 0,
+                          ink: today && presence.word != "idle" ? presence.ink : .white)
+                    .frame(width: 72, height: 44)
+                    .accessibilityHidden(true)
             }
             Divider().overlay(FocusInk.line)
             if folded {
@@ -353,13 +329,14 @@ struct JarvisTabView: View {
                             Color.clear.frame(height: 1).id("end")
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .glassReadingPane()
                     .onChange(of: sending) { _, newValue in
                         if newValue != nil && today { proxy.scrollTo("end", anchor: .bottom) }
                     }
                     .onAppear { if today { proxy.scrollTo("end", anchor: .bottom) } }
                 }
             }
-            if today { composer.padding(.top, 10) }
+            if today { composer(expanded: false).padding(.top, 10) }
             else {
                 HStack {
                     Text("Read only").foregroundStyle(FocusInk.secondary)
@@ -379,21 +356,23 @@ struct JarvisTabView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func composer(expanded: Bool) -> some View {
+        let unit = expanded ? scale : min(scale, 0.82)
+        let shape = RoundedRectangle(cornerRadius: 17 * unit, style: .continuous)
+        return VStack(alignment: .leading, spacing: 12 * unit) {
             ZStack(alignment: .topLeading) {
                 if draft.isEmpty {
-                    Text(asJob ? "Describe a job for Jarvis…" : "Ask Jarvis anything…")
+                    Text(asJob ? "Describe the job…" : "Message Jarvis")
                         .foregroundStyle(FocusInk.secondary)
-                        .font(.system(size: 16))
+                        .font(.system(size: 22 * unit))
                         .allowsHitTesting(false)
                 }
                 PromptBox(text: $draft, maxLength: jarvisTextMax, disabled: unreachable,
-                          focusToken: focusToken, inputFont: .systemFont(ofSize: 16),
+                          focusToken: focusToken, inputFont: .systemFont(ofSize: 22 * unit),
                           fieldLabel: "Message Jarvis",
                           onSubmit: submit)
-            }.frame(height: 50)
-            HStack(spacing: 12) {
+            }.frame(height: (expanded ? 82 : 52) * unit)
+            HStack(spacing: 16 * unit) {
                 Menu {
                     Section("Model") {
                         Picker("Model", selection: Binding(get: { doc?.model ?? .sonnet }, set: { m in Task { await changeModel(m) } })) {
@@ -408,48 +387,60 @@ struct JarvisTabView: View {
                     Divider()
                     ContextMeter(ctx: doc?.context)
                 } label: {
-                    Label((doc?.model ?? .sonnet).rawValue.capitalized, systemImage: "slider.horizontal.3")
+                    HStack(spacing: 12 * unit) {
+                        Text((doc?.model ?? .sonnet).rawValue.capitalized)
+                        Image(systemName: "chevron.down").font(.system(size: 13 * unit)).accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 13 * unit).frame(height: 42 * unit)
+                    .overlay { RoundedRectangle(cornerRadius: 9 * unit).strokeBorder(Color.white.opacity(0.23)) }
                 }
-                .menuStyle(.borderlessButton).fixedSize()
+                .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
                 .disabled(unreachable || live || sending != nil)
                 .accessibilityLabel("Response settings")
-                Button {
-                    asJob.toggle()
-                    focusToken += 1
-                } label: { Label("As job", systemImage: asJob ? "checkmark.circle.fill" : "briefcase") }
-                .foregroundStyle(asJob ? HT.c11 : FocusInk.secondary)
-                .accessibilityValue(asJob ? "On" : "Off")
+                .accessibilityValue((doc?.model ?? .sonnet).rawValue.capitalized)
+                Divider().frame(height: 22 * unit)
+                HStack(spacing: 7 * unit) {
+                    Toggle("As job", isOn: $asJob)
+                        .labelsHidden().toggleStyle(.switch).tint(.gray)
+                        .accessibilityLabel("As job")
+                    Text("As job")
+                        .onTapGesture { asJob.toggle() }
+                        .accessibilityHidden(true)
+                }
                 .disabled(unreachable || filing)
+                .onChange(of: asJob) { _, _ in focusToken += 1 }
                 Spacer(minLength: 2)
                 if draft.count > 3750 { Text("\(draft.count)/4000").font(.caption2) }
                 if live {
-                    Button("Stop") { Task { await stop() } }.foregroundStyle(FocusInk.sand)
+                    Button("Stop") { Task { await stop() } }.foregroundStyle(conversationAccent)
                 }
                 Button(action: toggleVoice) {
-                    Image(systemName: voice == .off ? "speaker" : "speaker.wave.2.fill")
-                        .frame(width: 22, height: 28)
+                    Image(systemName: voice == .off ? "speaker.wave.3" : "speaker.wave.3.fill")
+                        .font(.system(size: 25 * unit))
+                        .frame(width: 42 * unit, height: 42 * unit)
                 }
-                .foregroundStyle(voice == .off ? FocusInk.secondary : FocusInk.sand)
+                .foregroundStyle(voice == .off ? Color(white: 0.84) : conversationAccent)
                 .accessibilityLabel("Spoken replies")
                 .accessibilityValue(voiceLabel)
                 .help("Spoken replies: \(voiceLabel). Click to cycle.")
                 Button(action: submit) {
-                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(FocusInk.ground)
-                        .frame(width: 32, height: 32)
-                        .background(canSubmit ? HT.c11 : FocusInk.sand, in: Circle())
+                    Image(systemName: "arrow.up").font(.system(size: 23 * unit, weight: .medium))
+                        .foregroundStyle(Color(white: 0.09))
+                        .frame(width: 47 * unit, height: 47 * unit)
+                        .background(canSubmit ? .white : Color(white: 0.73), in: Circle())
                 }
+                .buttonStyle(HTPressStyle())
                 .accessibilityLabel(asJob ? "Run as job" : "Send message")
                 .disabled(!canSubmit)
             }
-            .font(.system(size: 12))
+            .font(.system(size: 19 * unit))
             if filing || (voice != .off && speaker.unavailable) {
                 Text(filing ? "Filing job…" : "Spoken replies unavailable").font(.caption)
             }
         }
-        .padding(16)
-        .background(FocusInk.composer, in: RoundedRectangle(cornerRadius: 15))
-        .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(FocusInk.border) }
+        .padding(21 * unit)
+        .background(FocusInk.conversationWell, in: shape)
+        .overlay { shape.strokeBorder(Ground.shared.glass ? HT.lineBright : Color.white.opacity(0.72), lineWidth: 1).allowsHitTesting(false) }
     }
 
     private var voiceLabel: String {
@@ -740,26 +731,5 @@ struct JarvisTabView: View {
     private func changeEffort(_ e: JarvisEffort) async {
         doc?.effort = e
         await settle(await model.store.jarvisSetEffort(e), "effort unchanged")
-    }
-}
-
-private struct FocusOrbits: View {
-    var body: some View {
-        Canvas { ctx, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            ctx.translateBy(x: center.x, y: center.y)
-            ctx.rotate(by: .degrees(-9))
-            for (width, height, dashed) in [(0.92, 0.58, true), (0.77, 0.46, false), (0.55, 0.34, false)] {
-                let w = size.width * width, h = size.height * height
-                let path = Path(ellipseIn: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
-                ctx.stroke(path, with: .color(dashed ? FocusInk.line : Color(red: 0.34, green: 0.31, blue: 0.22)),
-                           style: StrokeStyle(lineWidth: 0.7, dash: dashed ? [1, 4] : []))
-            }
-            for (x, y) in [(-0.34, 0.09), (0.35, -0.09), (-0.41, -0.22), (0.29, 0.43)] {
-                let dot = CGRect(x: x * size.width, y: y * size.height, width: 2.4, height: 2.4)
-                ctx.fill(Path(ellipseIn: dot), with: .color(FocusInk.sand))
-            }
-        }
-        .accessibilityHidden(true)
     }
 }

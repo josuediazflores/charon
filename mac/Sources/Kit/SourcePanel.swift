@@ -38,7 +38,7 @@ struct SourcePanel<Content: View>: View {
             title: title,
             icon: icon,
             glyph: glyph,
-            meta: AnyView(
+            meta: (meta != nil || h.level != .live) ? AnyView(
                 HStack(spacing: HT.s1) {
                     if let meta {
                         Text(meta)
@@ -46,9 +46,11 @@ struct SourcePanel<Content: View>: View {
                             .foregroundStyle(HT.inkDim)
                             .lineLimit(1)
                     }
-                    StatusLamp(level: h.lamp.level, of: h.lamp.of, tone: h.lamp.tone)
+                    if h.level != .live {
+                        StatusLamp(level: h.lamp.level, of: h.lamp.of, tone: h.lamp.tone)
+                    }
                 }
-            ),
+            ) : nil,
             footer: (h.pill != nil || h.note != nil) ? AnyView(
                 HStack(spacing: HT.cw) {
                     if let pill = h.pill {

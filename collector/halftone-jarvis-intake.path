@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for submitted overnight plans
+ConditionPathExists=!/var/lib/halftone-collector/jarvis-paused.json
+
+[Path]
+DirectoryNotEmpty=/home/pi/halftone-chat/jarvis/.intake-jobs
+Unit=halftone-jarvis-intake.service
+
+[Install]
+WantedBy=multi-user.target

@@ -132,8 +132,8 @@ struct DataTable<Row: Identifiable>: View {
                         if let headerView = pair.element.headerView {
                             headerView
                         } else {
-                            Text(pair.element.header.uppercased())
-                                .font(HT.body)
+                            Text(pair.element.header)
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(HT.inkDim)
                                 .lineLimit(1)
                         }
@@ -171,7 +171,7 @@ struct DataTable<Row: Identifiable>: View {
                             pair.element.cell(row)
                                 .lineLimit(1)
                                 .padding(.horizontal, HT.cw)
-                                .frame(height: HT.row)
+                                .frame(height: dense ? 20 : 25)
                                 .modifier(ColumnFrame(column: pair.element))
                                 // Per cell, and the cells abut: the grid's
                                 // horizontal spacing is zero, so the tints tile
@@ -190,27 +190,9 @@ struct DataTable<Row: Identifiable>: View {
                 }
             }
         }
-        // Frosted ground and a rule under the header row. ONE band across the
-        // whole row: a GridRow is not a view, so a modifier put on it lands on
-        // every CELL -- which painted a little frosted box per column with raw
-        // ground showing in the gaps. The band hangs off the Grid instead,
-        // top-aligned at the header row's fixed height.
-        //
-        // **It masks by blurring, not by covering.** The ground is a wash over
-        // a blur of the desktop, so an opaque void at a 0.50 wash reads as a
-        // black slab laid across the table. A material frosts instead, and the
-        // void goes over it at roughly a third to make the band this family's
-        // ground rather than a grey one. The header text sits on top of it at
-        // full opacity.
         .background(alignment: .top) {
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                HT.void.opacity(0.35)
-            }
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(HT.line).frame(height: 1)
-            }
-            .frame(height: HT.row + (dense ? 0 : HT.s1 * 2))
+            Rectangle().fill(HT.surface3)
+                .frame(height: HT.row + (dense ? 0 : HT.s1 * 2))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

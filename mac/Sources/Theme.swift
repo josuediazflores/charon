@@ -29,11 +29,13 @@ extension Color {
 
 enum FocusInk {
     static let ground = GroundFamily.graphite.palette.void
-    static let card = Color(red: 0.118, green: 0.122, blue: 0.122)
+    static var card: Color { Ground.shared.glass ? HT.surface2 : Color(red: 0.118, green: 0.122, blue: 0.122) }
     static let composer = Color(red: 0.133, green: 0.141, blue: 0.137)
-    static let line = Color(white: 0.21)
+    static var line: Color { Ground.shared.glass ? HT.line : Color(white: 0.21) }
     static let border = Color(white: 0.32)
-    static let secondary = Color(red: 0.67, green: 0.68, blue: 0.65)
+    static var secondary: Color {
+        Ground.shared.glass ? HT.inkMid : Color(red: 0.67, green: 0.68, blue: 0.65)
+    }
     static let text = Color(red: 0.95, green: 0.94, blue: 0.91)
     static let sand = Color(red: 0.85, green: 0.74, blue: 0.50)
 
@@ -41,13 +43,38 @@ enum FocusInk {
     static let body = Font.system(size: 13)
 
     static func heading(_ size: CGFloat) -> Font {
-        .custom("Iowan Old Style", size: size)
+        .system(size: size, weight: .semibold)
     }
 
-    static var cardLine: Color { Ground.family == .graphite ? line : HT.line }
+    static var cardLine: Color {
+        if Ground.shared.glass { return HT.lineFaint }
+        return Ground.family == .graphite ? line : HT.line
+    }
+
+    static var sidebar: Color {
+        if Ground.shared.glass { return Color.black.opacity(0.43) }
+        return Ground.family == .graphite ? Color(hex: 0x252525) : HT.surface2
+    }
+
+    static var conversationWell: Color {
+        if Ground.shared.glass { return HT.surface3 }
+        return Ground.family == .graphite ? Color(hex: 0x292929) : HT.surface3
+    }
 }
 
 extension View {
+    /// A single reading surface under a list or transcript lets the wallpaper
+    /// continue through the gaps between panes.
+    func glassReadingPane(inset: CGFloat = 12) -> some View {
+        let glass = Ground.shared.glass
+        let shape = RoundedRectangle(cornerRadius: FocusInk.cardRadius, style: .continuous)
+        return padding(glass ? inset : 0)
+            .background(glass ? HT.surface2 : .clear, in: shape)
+            .overlay {
+                if glass { shape.strokeBorder(HT.lineFaint, lineWidth: 1).allowsHitTesting(false) }
+            }
+    }
+
     func focusCard(border: Color = FocusInk.cardLine, width: CGFloat = 1) -> some View {
         let shape = RoundedRectangle(cornerRadius: FocusInk.cardRadius, style: .continuous)
         return background(HT.surface2, in: shape)

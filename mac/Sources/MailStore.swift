@@ -71,6 +71,8 @@ protocol ConsoleStore: AnyObject {
     func jarvisDays() async -> [JarvisDaySummary]?
     func jarvisDay(_ day: String) async throws -> JarvisDay?
     func jarvisJobs() async -> [JarvisJob]?
+    func processBrainDump(requestID: UUID, text: String) async throws -> String
+    func confirmBrainDump(id: String, tasks: [ProposedTask], runAt: Date) async throws
     func overnightRuns(before cursor: String?) async throws -> OvernightRunPage
     func overnightRun(id: String) async throws -> OvernightRun?
     /// A local temporary download. Its caller moves or removes it after reading.

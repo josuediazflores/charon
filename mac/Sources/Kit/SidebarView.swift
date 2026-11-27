@@ -9,17 +9,17 @@ struct SidebarItemSpec: Identifiable {
 
 enum ConsoleNav {
     static let items = [
-        SidebarItemSpec(id: "overview", symbol: "square.grid.2x2", label: "Overview"),
+        SidebarItemSpec(id: "overview", symbol: "house", label: "Overview"),
         SidebarItemSpec(id: "hardware", symbol: "cpu", label: "Hardware"),
-        SidebarItemSpec(id: "cmo", symbol: "newspaper", label: "CMO"),
+        SidebarItemSpec(id: "cmo", symbol: "waveform.path.ecg", label: "CMO"),
         SidebarItemSpec(id: "mail", symbol: "envelope", label: "Mail"),
-        SidebarItemSpec(id: "messages", symbol: "bubble.left.and.bubble.right", label: "Messages"),
-        SidebarItemSpec(id: "chat", symbol: "text.bubble", label: "Chat"),
-        SidebarItemSpec(id: "jarvis", symbol: "sparkle", label: "Jarvis"),
+        SidebarItemSpec(id: "messages", symbol: "bubble.left", label: "Messages"),
+        SidebarItemSpec(id: "chat", symbol: "bubble.left.and.bubble.right", label: "Chat"),
+        SidebarItemSpec(id: "jarvis", symbol: "sparkles", label: "Jarvis"),
         SidebarItemSpec(id: "settings", symbol: "gearshape", label: "Settings"),
     ]
 
-    static let overnight = SidebarItemSpec(id: "jarvis-overnight", symbol: "moon", label: "Overnight tasks")
+    static let overnight = SidebarItemSpec(id: "jarvis-overnight", symbol: "square.3.layers.3d", label: "Overnight tasks")
     static let destinations = items.flatMap { $0.id == "jarvis" ? [$0, overnight] : [$0] }
     static let ids: Set<String> = Set(destinations.map(\.id))
 
@@ -28,138 +28,160 @@ enum ConsoleNav {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var workspaceScale: CGFloat = 1
+}
+
 struct SidebarView: View {
+    // Wide enough for the three system window controls at their native spacing.
+    static let collapsedWidth: CGFloat = 80
+
     @AppStorage("jarvisSidebarExpanded") private var jarvisExpanded = true
-    var name: String = "Halftone"
-    /// Right side of the brand row, conventionally the hide-the-rail control.
-    var brandAside: AnyView? = nil
+    @Environment(\.workspaceScale) private var scale
+    let collapsed: Bool
+    let onToggle: () -> Void
     var items: [SidebarItemSpec] = ConsoleNav.items
     var active: String
     var onSelect: (String) -> Void
-    /// Pinned block below the nav.
-    var footer: AnyView? = nil
+    var footer: AnyView?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: HT.cw) {
-                Image(systemName: "circle.hexagongrid.fill")
-                    .font(.system(size: 17)).foregroundStyle(FocusInk.sand)
-                    .frame(width: HT.cw2, alignment: .leading)
-                Text(name)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(FocusInk.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let brandAside { brandAside }
-            }
-            .padding(.horizontal, HT.cw2)
-            .frame(height: 56)
+        GeometryReader { rail in
+            let short = rail.size.height < 600
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear
+                    .frame(height: 36)
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .accessibilityHidden(true)
 
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(items) { item in
-                        if item.id == "jarvis" {
-                            let sectionActive = active == item.id || active == ConsoleNav.overnight.id
-                            SidebarRow(item: item, active: sectionActive && !jarvisExpanded,
-                                       expanded: jarvisExpanded) {
-                                jarvisExpanded.toggle()
-                            }
-                            if jarvisExpanded {
-                                SidebarRow(item: .init(id: item.id, symbol: "text.bubble", label: "Conversation"),
-                                           active: active == item.id, nested: true) { onSelect(item.id) }
-                                SidebarRow(item: ConsoleNav.overnight, active: active == ConsoleNav.overnight.id,
-                                           nested: true) { onSelect(ConsoleNav.overnight.id) }
-                            }
-                        } else {
-                            SidebarRow(item: item, active: item.id == active) {
-                                onSelect(item.id)
+                Button(action: onToggle) {
+                    HStack(spacing: 12 * scale) {
+                        if !collapsed {
+                            JarvisMark().frame(width: 46 * scale, height: 46 * scale)
+                            Text("Jarvis").font(.system(size: 27 * scale, weight: .semibold)).fixedSize()
+                            Spacer(minLength: 0)
+                        }
+                        Image(systemName: "sidebar.left")
+                            .font(.system(size: collapsed ? 18 : 18 * scale))
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.leading, collapsed ? 0 : 30 * scale)
+                    .padding(.trailing, collapsed ? 0 : 18 * scale)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: short ? 52 : 108 * scale)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(collapsed ? "Expand sidebar" : "Collapse sidebar")
+                .help(collapsed ? "Expand sidebar (⌥⌘S)" : "Collapse sidebar (⌥⌘S)")
+
+                ScrollView {
+                    VStack(spacing: 2.5 * scale) {
+                        ForEach(items) { item in
+                            if item.id == "jarvis" {
+                                if !collapsed {
+                                    SidebarRow(item: item, active: !jarvisExpanded && (active == item.id || active == ConsoleNav.overnight.id),
+                                               expanded: jarvisExpanded, short: short) { jarvisExpanded.toggle() }
+                                }
+                                if collapsed || jarvisExpanded {
+                                    destination(.init(id: item.id, symbol: collapsed ? item.symbol : "bubble.left",
+                                                      label: "Conversation"), short: short, nested: true)
+                                    destination(ConsoleNav.overnight, short: short, nested: true)
+                                }
+                            } else {
+                                destination(item, short: short)
+                                    .padding(.top, item.id == "settings" ? (short ? 5 : 16 * scale) : 0)
                             }
                         }
                     }
+                    .padding(.horizontal, collapsed ? 7 : 11 * scale)
                 }
-                .padding(.vertical, 9)
-                .padding(.horizontal, 9)
-            }
-            .frame(maxHeight: .infinity)
-
-            if let footer {
-                footer
-                    .padding(.horizontal, HT.cw2)
-                    .padding(.vertical, HT.s2)
+                .scrollIndicators(collapsed ? .hidden : .automatic)
+                if let footer {
+                    footer.font(.system(size: 17 * scale))
+                        .frame(maxWidth: .infinity, alignment: collapsed ? .center : .leading)
+                        .padding(.horizontal, collapsed ? 0 : 30 * scale)
+                        .padding(.vertical, short ? 9 : 30 * scale)
+                }
             }
         }
-        .frame(width: 196)
-        .frame(maxHeight: .infinity)
-        .background(Color.clear)
-        .overlay(alignment: .trailing) { Rectangle().fill(FocusInk.cardLine).frame(width: 1) }
+        .background(FocusInk.sidebar)
+        .overlay(alignment: .trailing) {
+            if Ground.shared.glass { Rectangle().fill(HT.lineFaint).frame(width: 1).allowsHitTesting(false) }
+        }
+    }
+    private func destination(_ item: SidebarItemSpec, short: Bool, nested: Bool = false) -> some View {
+        SidebarRow(item: item, active: active == item.id, iconsOnly: collapsed, nested: nested && !collapsed,
+                   short: short) { onSelect(item.id) }
+    }
+
+}
+
+private struct JarvisMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let unit = size.width / 46
+            for row in -5...5 {
+                for col in -5...5 {
+                    let x = CGFloat(col) * 4.7 + (row.isMultiple(of: 2) ? 0 : 2.35)
+                    let y = CGFloat(row) * 4.4
+                    let r = hypot(x, y) / 23
+                    guard r < 1 else { continue }
+                    let diameter = (1 + 3.8 * (1 - r * r)) * (0.88 + 0.12 * cos(x + y))
+                    let dot = CGRect(x: (23 + x - diameter / 2) * unit, y: (23 + y - diameter / 2) * unit,
+                                     width: diameter * unit, height: diameter * unit)
+                    context.fill(Path(ellipseIn: dot), with: .color(.white))
+                }
+            }
+        }.accessibilityHidden(true)
     }
 }
 
 private struct SidebarRow: View {
-    var item: SidebarItemSpec
-    var active: Bool
-    var expanded: Bool? = nil
+    let item: SidebarItemSpec
+    let active: Bool
+    var expanded: Bool?
+    var iconsOnly = false
     var nested = false
-    var select: () -> Void
-
+    let short: Bool
+    let select: () -> Void
+    @Environment(\.workspaceScale) private var scale
     @State private var hovering = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: select) {
-            Pressed { down in
-                HStack(spacing: 10) {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: nested ? 11 : 14))
-                        .frame(width: 17)
-                        .foregroundStyle(active || item.id == "jarvis" ? FocusInk.sand : HT.inkMid)
-                    Text(item.label)
-                        .font(.system(size: nested ? 12 : 13, weight: active ? .semibold : .regular))
-                        .lineLimit(1)
-                    Spacer(minLength: 2)
-                    if let badge = item.badge { Text(badge).font(.caption) }
+            HStack(spacing: (scale <= 0.73 ? 10 : (nested ? 18 : 21)) * scale) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: (nested ? 21 : 24) * scale, weight: .regular))
+                    .frame(width: iconsOnly ? SidebarView.collapsedWidth - 14 : 28 * scale)
+                    .foregroundStyle(Color(white: 0.84))
+                if !iconsOnly {
+                    Text(item.label).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
                     if let expanded {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 13 * scale, weight: .medium))
                     }
                 }
-                .foregroundStyle(active || hovering ? FocusInk.text : HT.inkMid)
-                .padding(.horizontal, 10)
-                .frame(height: nested ? 30 : 34)
-                .background(down ? HT.surface4 : (active || hovering ? HT.surface3 : .clear),
-                            in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    if focused { RoundedRectangle(cornerRadius: 8).strokeBorder(FocusInk.sand) }
-                }
-                .padding(.leading, nested ? 18 : 0)
-                .contentShape(Rectangle())
             }
+            .foregroundStyle(.white)
+            // Keep icons on the leading edge as the sidebar changes width.
+            .padding(.leading, iconsOnly ? 0 : (nested ? 15 : 21) * scale)
+            .padding(.trailing, iconsOnly ? 0 : (scale <= 0.73 ? 6 : 20) * scale)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: short ? 29 : (nested ? 44 : 47) * scale)
+            .background(active ? Color.white.opacity(0.13) : (hovering ? Color.white.opacity(0.06) : .clear),
+                        in: RoundedRectangle(cornerRadius: 9 * scale))
+            .padding(.leading, nested ? (scale <= 0.73 ? 12 : 29) * scale : 0)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(HTPressStyle())
-        .focused($focused)
-        .focusEffectDisabled()
+        .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .accessibilityLabel(Text(item.label))
-        .accessibilityValue(Text(expanded.map { $0 ? "Expanded" : "Collapsed" } ?? ""))
+        .help(item.label)
+        .accessibilityLabel(item.label)
+        .accessibilityValue(expanded.map { $0 ? "Expanded" : "Collapsed" } ?? "")
         .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
-}
-
-struct RailStub: View {
-    var onShow: () -> Void
-
-    var body: some View {
-        VStack {
-            Button(action: onShow) {
-                Image(systemName: "sidebar.left").foregroundStyle(FocusInk.sand)
-                    .frame(width: 38, height: 54).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Show sidebar")
-            .help("Show sidebar (⌥⌘S)")
-            Spacer()
-        }
-        .overlay(alignment: .trailing) { Rectangle().fill(FocusInk.cardLine).frame(width: 1) }
     }
 }
