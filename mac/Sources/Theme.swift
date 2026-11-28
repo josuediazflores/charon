@@ -8,11 +8,10 @@ import SwiftUI
  * is what keeps the palette from drifting by accident.
  *
  * The meanings hold:
- *   green   nominal, and the app's primary accent (unread, live)
- *   amber   caution      (stale, urgency 2)
+ *   green   nominal, unread and live
+ *   copper  caution      (stale, urgency 2)
  *   red     fault        (failed, urgency 3)
- *   cyan    selection    -- spent EXACTLY twice in the whole app: the selected
- *                           row's inset rail, and CONFIRM SEND.
+ *   silver  selection and primary actions
  */
 
 extension Color {
@@ -34,10 +33,12 @@ enum FocusInk {
     static var line: Color { Ground.shared.glass ? HT.line : Color(white: 0.21) }
     static let border = Color(white: 0.32)
     static var secondary: Color {
-        Ground.shared.glass ? HT.inkMid : Color(red: 0.67, green: 0.68, blue: 0.65)
+        Ground.shared.glass ? HT.inkMid : Color(white: 0.68)
     }
-    static let text = Color(red: 0.95, green: 0.94, blue: 0.91)
-    static let sand = Color(red: 0.85, green: 0.74, blue: 0.50)
+    static let text = Color(white: 0.95)
+    static let accent = Color(hex: 0xd5d9de)
+    /// A darker track keeps the white switch thumb legible.
+    static let switchTint = Color(hex: 0x74808b)
 
     static let cardRadius: CGFloat = 11
     static let body = Font.system(size: 13)
@@ -128,14 +129,14 @@ enum M {
     // MARK: - meaning
 
     static let accent = Color(hex: 0x7ee07e)   // --ht-nominal
-    static let caution = Color(hex: 0xffcc55)  // --ht-caution
+    static let caution = HT.caution
     static let fault = Color(hex: 0xff5f4f)    // --ht-fault
-    /// Selection. Two call sites in the entire app and no more.
-    static let select = FocusInk.sand
+    /// Selection rails and the confirm-send button share the workspace accent.
+    static let select = FocusInk.accent
     /// The console's focus ring is blue and only ever means focus.
     static let focus = Color(hex: 0x6fb0ff)    // --ht-c12
 
-    static let cautionWash = Color(hex: 0xffcc55).opacity(0.12)
+    static let cautionWash = caution.opacity(0.12)
     static let faultWash = Color(hex: 0xff5f4f).opacity(0.12)
 
     // MARK: - geometry

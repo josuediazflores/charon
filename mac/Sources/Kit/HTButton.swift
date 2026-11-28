@@ -89,7 +89,7 @@ struct HTButton: View {
 
     private func fill(_ down: Bool) -> Color {
         if disabled { return .clear }
-        if variant == .primary { return down ? HT.inkMid : FocusInk.sand }
+        if variant == .primary { return down ? HT.inkMid : FocusInk.accent }
         if down { return HT.surface4 }
         if hovering || variant == .secondary { return HT.surface3 }
         return .clear
@@ -181,12 +181,12 @@ struct IconButton: View {
     private func fill(_ down: Bool) -> Color {
         if disabled { return .clear }
         let held = down && !disabled
-        if on { return held ? HT.inkMid : FocusInk.sand }
+        if on { return held ? HT.inkMid : FocusInk.accent }
         return held ? HT.inkDim : (hot(down) ? HT.inkMid : .clear)
     }
 
     private var border: Color {
-        if on { return FocusInk.sand }
+        if on { return FocusInk.accent }
         return bordered ? HT.line : .clear
     }
 

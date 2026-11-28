@@ -45,8 +45,8 @@ struct JobWord {
         switch state {
         // `~` rather than a dot, the glyph the chat transcript's `~queued` pill
         // already uses for this state one tab over.
-        case .queued: self = JobWord(glyph: "~", word: "queued", ink: HT.caution)
-        case .running: self = JobWord(glyph: "›", word: "running", ink: HT.caution)
+        case .queued: self = JobWord(glyph: "~", word: "queued", ink: FocusInk.accent)
+        case .running: self = JobWord(glyph: "›", word: "running", ink: FocusInk.accent)
         case .done: self = JobWord(glyph: "+", word: "done", ink: HT.nominal)
         case .error: self = JobWord(glyph: "×", word: "failed", ink: HT.fault)
         case .stopped: self = JobWord(glyph: "-", word: "stopped", ink: HT.inkMid)
@@ -137,7 +137,7 @@ struct JarvisAnswerTurn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                Image(systemName: "sparkle").foregroundStyle(HT.c11)
+                Image(systemName: "sparkle").foregroundStyle(FocusInk.accent)
                 Text("Jarvis").fontWeight(.semibold)
                 if !turn.at.isEmpty { Text(Fmt.hhmm(turn.at)).font(.caption2).foregroundStyle(.secondary) }
             }.font(.system(size: 12))
@@ -231,7 +231,7 @@ struct JarvisJobCard: View {
             // nothing about the conversation: two lanes, two locks, two stop
             // flags, and three jobs can be running while only one is regretted.
             if running {
-                ChatTextButton(text: "[stop]", ink: HT.inkMid, hoverInk: HT.caution,
+                ChatTextButton(text: "[stop]", ink: HT.inkMid, hoverInk: HT.inkBright,
                                label: "Stop \(turn.title.isEmpty ? "this job" : turn.title)") {
                     onStop(turn.jobId)
                 }
@@ -316,10 +316,7 @@ struct JarvisNotice: View {
                 if folded {
                     Text("· folded").font(HT.body).foregroundStyle(HT.inkMid)
                 } else {
-                    // Amber because it belongs to the amber line that raised it,
-                    // and because folding the day is a thing you do when
-                    // something is filling up rather than the thing this page is
-                    // for. Never the cyan: that is spent on send.
+                    // Match the context warning that offers this action.
                     ChatTextButton(text: "[compact]", ink: ink, hoverInk: HT.inkBright,
                                    action: onCompact)
                 }

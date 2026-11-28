@@ -502,7 +502,7 @@ private struct ChatStreaming: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: HT.cw) {
                     StatusPill(text: queued ? "~queued" : "~running",
-                               tone: .caution, glyph: false)
+                               glyph: false)
                     Text(queued ? "filed · waiting for the runner" : "answering")
                         .font(HT.body)
                         .foregroundStyle(HT.inkMid)
@@ -770,7 +770,7 @@ struct ChatComposer: View {
                 // Bracketed like every other text control here, and deliberately
                 // not red: stopping is ordinary, and a red control beside a
                 // running process reads as an alarm about the process.
-                ChatTextButton(text: "[stop]", ink: HT.inkMid, hoverInk: HT.caution,
+                ChatTextButton(text: "[stop]", ink: HT.inkMid, hoverInk: HT.inkBright,
                                action: onStop)
             }
 

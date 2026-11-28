@@ -27,7 +27,7 @@ struct DotLeader: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
-                .foregroundStyle(labelInk ?? (keyed ? FocusInk.sand : HT.inkMid))
+                .foregroundStyle(labelInk ?? (keyed ? FocusInk.accent : HT.inkMid))
                 .lineLimit(1)
             Spacer(minLength: 4)
             Text(value)

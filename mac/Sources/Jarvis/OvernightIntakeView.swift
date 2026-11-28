@@ -1,5 +1,16 @@
 import SwiftUI
 
+private struct OvernightPrimaryAction: ViewModifier {
+    @Environment(\.appearsActive) private var appearsActive
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.borderedProminent)
+            .tint(FocusInk.accent)
+            .foregroundStyle(appearsActive ? Color.black : Color.primary)
+    }
+}
+
 struct OvernightIntakeView: View {
     let store: ConsoleStore
     let back: () -> Void
@@ -41,8 +52,7 @@ struct OvernightIntakeView: View {
                     }
                 }.disabled(sending)
                 Button("Process") { Task { await process() } }
-                    .buttonStyle(.borderedProminent).tint(FocusInk.sand)
-                    .foregroundStyle(canProcess ? Color.black : .secondary)
+                    .modifier(OvernightPrimaryAction())
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canProcess)
             }
@@ -113,9 +123,9 @@ private struct SeparatingTasks: View {
                         let x = (size.width - 96) / 2
                         let box = CGRect(x: x, y: y - 6, width: 96, height: 17)
                         canvas.stroke(Path(roundedRect: box, cornerRadius: 4),
-                                      with: .color(FocusInk.sand.opacity(spread * 0.7)), lineWidth: 1)
+                                      with: .color(FocusInk.accent.opacity(spread * 0.7)), lineWidth: 1)
                         let line = CGRect(x: x + 9, y: y + 1, width: CGFloat(65 - row * 10), height: 2)
-                        canvas.fill(Path(roundedRect: line, cornerRadius: 1), with: .color(FocusInk.sand))
+                        canvas.fill(Path(roundedRect: line, cornerRadius: 1), with: .color(FocusInk.accent))
                     }
                 }
             }
@@ -174,7 +184,7 @@ private struct OvernightStartPicker: View {
     private var scheduleButton: some View {
         Button { editing = true } label: {
             HStack(spacing: 9) {
-                Image(systemName: "calendar").foregroundStyle(FocusInk.sand)
+                Image(systemName: "calendar").foregroundStyle(FocusInk.accent)
                 Text(dateLabel)
                 Rectangle().fill(FocusInk.cardLine).frame(width: 1, height: 14)
                 Text(timeLabel).monospacedDigit()
@@ -273,14 +283,14 @@ private struct StartTimeEditor: View {
                 }
                 .padding(.horizontal, 10).frame(width: 106, height: 30)
                 .background(FocusInk.composer, in: RoundedRectangle(cornerRadius: 7))
-                .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(typing ? FocusInk.sand : FocusInk.line) }
+                .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(typing ? FocusInk.accent : FocusInk.line) }
             }
             HStack(spacing: 6) {
                 preset("Midnight", hour: 0)
                 preset("1 AM", hour: 1)
                 Spacer()
                 Button("Set start") { if let date = chosenStart { apply(date) } }
-                    .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
+                    .modifier(OvernightPrimaryAction())
                     .disabled(chosenStart.map { $0 <= .now } ?? true)
             }
             if chosenStart == nil && !clockText.isEmpty {
@@ -334,7 +344,7 @@ private struct StartTimeEditor: View {
             Text(date, format: .dateTime.day()).font(.body.monospacedDigit().weight(selected ? .bold : .regular))
                 .frame(maxWidth: .infinity).frame(height: 30)
                 .foregroundStyle(selected ? FocusInk.ground : past ? FocusInk.secondary : FocusInk.text)
-                .background(selected ? FocusInk.sand : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .background(selected ? FocusInk.accent : .clear, in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(past)
@@ -372,8 +382,8 @@ private struct StartTimeEditor: View {
         } label: {
             Text(title).font(.caption.weight(.medium))
                 .padding(.horizontal, 9).frame(height: 25)
-                .foregroundStyle(active ? FocusInk.sand : FocusInk.text)
-                .overlay { Capsule().strokeBorder(active ? FocusInk.sand : FocusInk.line) }
+                .foregroundStyle(active ? FocusInk.accent : FocusInk.text)
+                .overlay { Capsule().strokeBorder(active ? FocusInk.accent : FocusInk.line) }
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -430,7 +440,7 @@ struct BrainDumpReview: View {
                 Spacer()
                 if loaded {
                     Button("Done") { Task { await finish() } }
-                        .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
+                        .modifier(OvernightPrimaryAction())
                         .disabled(saving || cards.isEmpty || !cards.allSatisfy { $0.valid })
                 }
             }

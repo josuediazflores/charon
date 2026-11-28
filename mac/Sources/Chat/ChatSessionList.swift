@@ -371,9 +371,7 @@ struct ChatSessionList: View {
    clock, by the glyph before that word, and by the rail down the left edge. Only
    the third is colour, so the card survives being printed 1-bit.
 
-   **A rail means something is wrong.** An idle card carries none -- rule 6
-   applied to a list. A faint rail down fifty cards is a wall of frames, and the
-   two that are actually amber stop being found.
+   Rails mark active and failed sessions.
 */
 struct SessionCard: View {
 
@@ -403,11 +401,8 @@ struct SessionCard: View {
     private var blank: Bool { thread.title.isEmpty && thread.turnCount == 0 }
     private var title: String { chatUntitled(thread.title) }
 
-    /// The rail, or nothing. Running and queued share amber on purpose -- they
-    /// are one fact to a reader ("not yours right now") and the words beside them
-    /// are what tell them apart.
     private var rail: Color? {
-        if live { return HT.caution }
+        if live { return FocusInk.accent }
         if thread.status == .error { return HT.fault }
         return nil
     }
@@ -422,7 +417,7 @@ struct SessionCard: View {
     /// one -- so a failed card carries the view's own word.
     private var said: (text: String, ink: Color, cursor: Bool) {
         if live {
-            return (thread.queued ? "waiting for the runner" : "answering", HT.caution, true)
+            return (thread.queued ? "waiting for the runner" : "answering", FocusInk.accent, true)
         }
         if thread.status == .error { return ("the session failed", HT.fault, false) }
         if let preview = thread.preview, !preview.isEmpty { return (preview, HT.inkMid, false) }

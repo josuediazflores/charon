@@ -24,7 +24,7 @@ struct Panel<Content: View>: View {
 
     private var border: Color {
         if let ink = tone.ink { return ink }
-        if selected { return FocusInk.sand }
+        if selected { return FocusInk.accent }
         return ticks || variant == .double ? HT.line : FocusInk.cardLine
     }
 
@@ -32,8 +32,8 @@ struct Panel<Content: View>: View {
         let card = VStack(alignment: .leading, spacing: 0) {
             if hasHeader {
                 HStack(spacing: 8) {
-                    if let icon { Text(icon).foregroundStyle(FocusInk.sand) }
-                    if let glyph { PixelGlyph(name: glyph, color: FocusInk.sand) }
+                    if let icon { Text(icon).foregroundStyle(FocusInk.secondary) }
+                    if let glyph { PixelGlyph(name: glyph, color: FocusInk.secondary) }
                     if let title {
                         Text(title).font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(tone.ink ?? FocusInk.text)

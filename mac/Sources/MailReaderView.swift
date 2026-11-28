@@ -686,7 +686,7 @@ struct MailReaderView: View {
 
                 if draftWorking(msg) {
                     HStack(spacing: 8) {
-                        Flag(icon: .alert, word: "drafting", tone: M.caution)
+                        Flag(icon: .pencil, word: "drafting", tone: FocusInk.accent)
                         Text("a session on the Pi is writing it · this page is watching")
                             .font(Face.body).foregroundStyle(M.inkDim)
                     }

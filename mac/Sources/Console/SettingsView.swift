@@ -500,7 +500,7 @@ struct SettingsView: View {
             Slider(value: value, in: range, step: 0.01) { Text(label) }
                 .labelsHidden()
                 .controlSize(.small)
-                .tint(FocusInk.sand)
+                .tint(FocusInk.accent)
                 .frame(maxWidth: 135)
                 .accessibilityValue(value.wrappedValue.formatted(.percent))
             Text(value.wrappedValue.formatted(.percent))
@@ -623,7 +623,7 @@ private struct ToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .tint(FocusInk.sand)
+                .tint(FocusInk.switchTint)
         }
         .frame(minHeight: 28)
     }

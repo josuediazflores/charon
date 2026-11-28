@@ -82,8 +82,7 @@ func chatInFlight(queued: Bool, status: ChatStatus) -> Bool {
 
 /// The non-colour channel for every thread state. A glyph and a word, so the
 /// list survives being printed 1-bit -- and so the two in-flight states, which a
-/// reader genuinely wants told apart, are told apart by their words rather than
-/// by a shared amber.
+/// reader genuinely wants told apart, each have their own word.
 struct ChatStateWord {
     var glyph: String
     var word: String
@@ -93,9 +92,9 @@ struct ChatStateWord {
         // `~` rather than a dot, which is the glyph the transcript's own
         // `~queued` pill already uses for this state one route over.
         if queued {
-            self = ChatStateWord(glyph: "~", word: "queued", tone: .caution)
+            self = ChatStateWord(glyph: "~", word: "queued", tone: .default)
         } else if status == .running {
-            self = ChatStateWord(glyph: "›", word: "running", tone: .caution)
+            self = ChatStateWord(glyph: "›", word: "running", tone: .default)
         } else if status == .error {
             self = ChatStateWord(glyph: "×", word: "failed", tone: .fault)
         } else {

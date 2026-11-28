@@ -105,7 +105,8 @@ struct ConsoleView: View {
 
     private var mastheadRows: [MastheadRow] {
         guard payload != nil else {
-            return [MastheadRow("collector", connectionError == nil ? "connecting" : "offline", tone: .caution)]
+            if connectionError == nil { return [MastheadRow("collector", "connecting")] }
+            return [MastheadRow("collector", "offline", tone: .caution)]
         }
         return [
             MastheadRow("collector", "up \(Fmt.dur(payload?.collector?.uptimeS))"),

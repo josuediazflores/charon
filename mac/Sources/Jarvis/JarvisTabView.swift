@@ -48,19 +48,36 @@ private struct Presence {
     /// is 0.05 rather than 0, because a sphere that stops dead reads as broken
     /// rather than as resting.
     var activity: Double
-    /// What he is DOING, as a colour -- three values and no more. Gold is the
-    /// resting identity; blue is a turn of his in flight (thinking, queued,
-    /// filing -- one family, one hue, so "queued" cannot read as a different
-    /// kind of event than the "thinking" it becomes); red is a real fault
-    /// (failed, unreachable), spent there and nowhere else so it agrees with
-    /// what red means everywhere else in this console. Never cyan: cyan is
-    /// "this one" and is spent exactly twice in the whole app.
-    var ink: Color = HT.c11
+    /// A turn in flight uses blue and a failure uses red.
+    var ink: Color = FocusInk.accent
 }
 
-struct JarvisTabView: View {
+struct JarvisWorkspace: View {
+    let model: MailModel
+    @Binding var tab: String
+    @State private var openBrainDumpOnArrival = false
+    @State private var draft = ""
+    @State private var asJob = false
+
+    var body: some View {
+        if tab == ConsoleNav.overnight.id {
+            OvernightTasksView(model: model, startInBrainDump: openBrainDumpOnArrival)
+                .onAppear { openBrainDumpOnArrival = false }
+        } else {
+            JarvisTabView(model: model, draft: $draft, asJob: $asJob) {
+                openBrainDumpOnArrival = true
+                tab = ConsoleNav.overnight.id
+            }
+        }
+    }
+}
+
+private struct JarvisTabView: View {
 
     var model: MailModel
+    @Binding var draft: String
+    @Binding var asJob: Bool
+    let openBrainDump: () -> Void
 
     /// `#jarvis/<YYYY-MM-DD>`, or nil for today.
     ///
@@ -89,8 +106,6 @@ struct JarvisTabView: View {
     @State private var folded = false
     @State private var historyOpen = false
     @State private var todayID: String?
-    @State private var draft = ""
-    @State private var asJob = false
     @State private var filing = false
     @State private var focusToken = 0
 
@@ -105,8 +120,6 @@ struct JarvisTabView: View {
     /// nothing yet spoken would prefix-match trivially and read the whole of it
     /// aloud.
     @State private var voiceBase = 0
-
-    private let conversationAccent = Color(white: 0.95)
 
     private var today: Bool { day == nil }
 
@@ -182,6 +195,7 @@ struct JarvisTabView: View {
                                     focusToken += 1
                                 } label: { shortcutLabel("Review overnight work", symbol: "sunrise") }
                                 .disabled(!draft.isEmpty)
+                                BrainDumpButton(action: openBrainDump)
                                 Spacer()
                                 historyButton
                             }
@@ -294,6 +308,7 @@ struct JarvisTabView: View {
             HStack {
                 dayHeading(today ? "Conversation" : "Archived conversation", compact: true)
                 Spacer()
+                BrainDumpButton(action: openBrainDump)
                 historyButton.font(FocusInk.body).foregroundStyle(FocusInk.secondary)
                 if !missing && !unreachable {
                     Button {
@@ -401,7 +416,7 @@ struct JarvisTabView: View {
                 Divider().frame(height: 22 * unit)
                 HStack(spacing: 7 * unit) {
                     Toggle("As job", isOn: $asJob)
-                        .labelsHidden().toggleStyle(.switch).tint(.gray)
+                        .labelsHidden().toggleStyle(.switch).tint(FocusInk.switchTint)
                         .accessibilityLabel("As job")
                     Text("As job")
                         .onTapGesture { asJob.toggle() }
@@ -412,14 +427,14 @@ struct JarvisTabView: View {
                 Spacer(minLength: 2)
                 if draft.count > 3750 { Text("\(draft.count)/4000").font(.caption2) }
                 if live {
-                    Button("Stop") { Task { await stop() } }.foregroundStyle(conversationAccent)
+                    Button("Stop") { Task { await stop() } }.foregroundStyle(FocusInk.accent)
                 }
                 Button(action: toggleVoice) {
                     Image(systemName: voice == .off ? "speaker.wave.3" : "speaker.wave.3.fill")
                         .font(.system(size: 25 * unit))
                         .frame(width: 42 * unit, height: 42 * unit)
                 }
-                .foregroundStyle(voice == .off ? Color(white: 0.84) : conversationAccent)
+                .foregroundStyle(voice == .off ? Color(white: 0.84) : FocusInk.accent)
                 .accessibilityLabel("Spoken replies")
                 .accessibilityValue(voiceLabel)
                 .help("Spoken replies: \(voiceLabel). Click to cycle.")

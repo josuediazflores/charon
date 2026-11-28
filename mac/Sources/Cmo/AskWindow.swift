@@ -383,7 +383,7 @@ struct AskWindow: View {
                         AskMetaRow {
                             Text("stale · reflects \(stale)")
                                 .font(HT.body)
-                                .foregroundStyle(HT.c3)
+                                .foregroundStyle(HT.caution)
                         }
                     }
 
@@ -717,7 +717,7 @@ private struct ThinkingMeta: View {
     var body: some View {
         AskMetaRow {
             HStack(spacing: HT.cw) {
-                StatusPill(text: "~ask", tone: .caution, glyph: false)
+                StatusPill(text: "~ask", glyph: false)
                 Text("\(verb)…").font(HT.body).foregroundStyle(HT.inkDim)
             }
         }

@@ -60,7 +60,7 @@ struct GlobeView: View {
                     .font(HT.body)
                     .kerning(0)
                     .tracking(0)
-                    .foregroundStyle(tone.ink ?? FocusInk.sand)
+                    .foregroundStyle(tone.ink ?? FocusInk.accent)
                     .fixedSize()
                     // The em box, not the cell's 16px row: any leading at all
                     // opens hairlines between the rows and the sphere comes

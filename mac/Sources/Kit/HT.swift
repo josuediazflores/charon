@@ -156,7 +156,7 @@ enum HT {
     // MARK: - semantic
 
     static let nominal = c10
-    static let caution = c11
+    static let caution = Color(hex: 0xe2ad79)
     static let fault = c9
     /// Stays the ANSI grey it always was, and does **not** follow `inkDim` up
     /// the new ink ramp even though it used to share a value with it. A standby

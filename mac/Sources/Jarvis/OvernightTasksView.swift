@@ -4,10 +4,11 @@ import SwiftUI
 
 struct OvernightTasksView: View {
     let model: MailModel
+    let startInBrainDump: Bool
 
     var body: some View {
-        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL)
-            .id(ObjectIdentifier(model.store))
+        OvernightRunList(store: model.store, draftScope: model.connection.mode.rawValue + model.connection.baseURL,
+                         composing: startInBrainDump)
     }
 }
 
@@ -20,7 +21,7 @@ private struct OvernightRunList: View {
     let store: ConsoleStore
     let draftScope: String
     @State private var runs: [OvernightRun] = []
-    @State private var composing = false
+    @State var composing: Bool
     @State private var route: [OvernightRun] = []
     @State private var cursor: String?
     @State private var query = PageRequest()
@@ -55,10 +56,7 @@ private struct OvernightRunList: View {
                         HStack {
                             Text("Overnight tasks").font(FocusInk.heading(28)).foregroundStyle(FocusInk.text)
                             Spacer()
-                            Button { composing = true } label: {
-                                Label("Set overnight tasks", systemImage: "plus")
-                            }
-                            .buttonStyle(.borderedProminent).tint(FocusInk.sand).foregroundStyle(.black)
+                            BrainDumpButton { composing = true }
                             Button { query = PageRequest() } label: { Image(systemName: "arrow.clockwise") }
                                 .accessibilityLabel("Refresh overnight tasks").disabled(loading)
                         }
@@ -72,7 +70,7 @@ private struct OvernightRunList: View {
                         }
                         if runs.isEmpty && !loading && error == nil {
                             ContentUnavailableView("No overnight tasks", systemImage: "moon",
-                                description: Text("Choose Set overnight tasks to plan your first run."))
+                                description: Text("Open Brain Dump to plan your first run."))
                         }
                         if !runs.isEmpty {
                             VStack(spacing: 0) {
@@ -125,6 +123,52 @@ private struct OvernightRunList: View {
             }
             loading = false
         }
+    }
+}
+
+struct BrainDumpButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label {
+                Text("Brain Dump")
+            } icon: {
+                BrainDumpIcon()
+                    .stroke(style: StrokeStyle(lineWidth: 1.35, lineCap: .round, lineJoin: .round))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 15, height: 15)
+                    .accessibilityHidden(true)
+            }
+        }
+        .font(.body)
+        .buttonStyle(.bordered)
+    }
+}
+
+private struct BrainDumpIcon: Shape {
+    func path(in rect: CGRect) -> Path {
+        var lobe = Path()
+        lobe.move(to: CGPoint(x: 12, y: 5))
+        lobe.addQuadCurve(to: CGPoint(x: 6.4, y: 4.6), control: CGPoint(x: 9.5, y: -0.6))
+        lobe.addQuadCurve(to: CGPoint(x: 3.4, y: 9.6), control: CGPoint(x: 2.3, y: 4.8))
+        lobe.addQuadCurve(to: CGPoint(x: 3.6, y: 15.3), control: CGPoint(x: 0, y: 12.3))
+        lobe.addQuadCurve(to: CGPoint(x: 6.4, y: 19.4), control: CGPoint(x: 2.8, y: 18.8))
+        lobe.addQuadCurve(to: CGPoint(x: 12, y: 19.5), control: CGPoint(x: 9.1, y: 24.5))
+
+        lobe.move(to: CGPoint(x: 6.4, y: 4.6))
+        lobe.addQuadCurve(to: CGPoint(x: 7.4, y: 7.3), control: CGPoint(x: 6.1, y: 6.1))
+        lobe.move(to: CGPoint(x: 3.4, y: 9.6))
+        lobe.addQuadCurve(to: CGPoint(x: 6.8, y: 11.7), control: CGPoint(x: 6, y: 9.6))
+        lobe.move(to: CGPoint(x: 7.1, y: 16.5))
+        lobe.addQuadCurve(to: CGPoint(x: 12, y: 12.9), control: CGPoint(x: 10.7, y: 16.9))
+
+        var brain = lobe
+        brain.addPath(lobe, transform: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 24, ty: 0))
+        brain.move(to: CGPoint(x: 12, y: 5))
+        brain.addLine(to: CGPoint(x: 12, y: 19.5))
+        return brain.applying(CGAffineTransform(a: rect.width / 24, b: 0, c: 0, d: rect.height / 24,
+                                                tx: rect.minX, ty: rect.minY))
     }
 }
 
