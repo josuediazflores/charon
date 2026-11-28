@@ -39,6 +39,7 @@ struct ConsoleShellView: View {
     /// drawing for a beat is nothing, an orb that stopped because a tooltip
     /// died is a bug this file has already had.
     @State private var consoleWindow: NSWindow?
+    @State private var isFullScreen = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -100,12 +101,20 @@ struct ConsoleShellView: View {
         .background {
             WindowChrome(wash: Ground.shared.glass
                 ? .glass(transparency: settings.glassTransparency, blur: settings.glassBlur,
-                         reduceTransparency: reduceTransparency)
+                         reduceTransparency: reduceTransparency, fullScreen: isFullScreen)
                 : .standard(family: settings.ground, opacity: settings.groundOpacity, picture: settings.backdrop))
         }
         .background { WindowProbe { probed in
-            if consoleWindow !== probed { consoleWindow = probed }
+            if consoleWindow !== probed {
+                consoleWindow = probed
+                isFullScreen = probed?.styleMask.contains(.fullScreen) == true
+            }
         } }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
+            .merge(with: NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification))) { note in
+            guard let window = note.object as? NSWindow, window === consoleWindow else { return }
+            isFullScreen = window.styleMask.contains(.fullScreen)
+        }
         // Keep the destination name in the Window menu and accessibility tree.
         .navigationTitle(ConsoleNav.label(tab))
         .onChange(of: autoCollapseMessage) { _, _ in expandedMailMessage = nil }
@@ -360,7 +369,7 @@ private struct WindowProbe: NSViewRepresentable {
 
 private enum WindowWash: Equatable {
     case standard(family: GroundFamily, opacity: Double, picture: Double)
-    case glass(transparency: Double, blur: Double, reduceTransparency: Bool)
+    case glass(transparency: Double, blur: Double, reduceTransparency: Bool, fullScreen: Bool)
 }
 
 private struct WindowChrome: NSViewRepresentable {
@@ -473,11 +482,15 @@ private final class GroundBackdrop: NSVisualEffectView {
             plate.layer?.backgroundColor = NSColor(family.palette.void).withAlphaComponent(opacity).cgColor
             art.alphaValue = strength
             art.layer?.contents = strength > 0 ? BackdropPicture.image : nil
-        case let .glass(transparency, blur, reduceTransparency):
+        case let .glass(transparency, blur, reduceTransparency, fullScreen):
             material = .hudWindow
             setBlurStrength(reduceTransparency ? 0 : blur)
             art.layer?.contents = nil
-            plate.layer?.backgroundColor = nil
+            // A full-screen Space exposes the wallpaper. Back the glass with
+            // charcoal so even highly saturated wallpaper only faintly shows through.
+            plate.layer?.backgroundColor = fullScreen
+                ? NSColor(srgbRed: 0.12, green: 0.125, blue: 0.13, alpha: 0.94).cgColor
+                : nil
             tint.isHidden = false
             // Leave the upper-right open to the scenery. Darken the reading edge
             // more when the user dials down blur and sharp highlights come through.
